@@ -751,8 +751,9 @@ function assertPassword(password: string): void {
 async function hashPassword(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const key = await crypto.subtle.importKey('raw', enc(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: toArrayBuffer(salt), iterations: 120000, hash: 'SHA-256' }, key, 256);
-  return `pbkdf2$120000$${base64url(salt)}$${base64url(new Uint8Array(bits))}`;
+  const iterations = 100000;
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: toArrayBuffer(salt), iterations, hash: 'SHA-256' }, key, 256);
+  return `pbkdf2$${iterations}$${base64url(salt)}$${base64url(new Uint8Array(bits))}`;
 }
 
 async function verifyPassword(password: string, stored: string): Promise<boolean> {
