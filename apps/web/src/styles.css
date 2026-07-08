@@ -387,6 +387,21 @@ th {
   color: #1f6f5b;
 }
 
+.checkList {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f5f7ef;
+  color: #515c55;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.checkList span {
+  overflow-wrap: anywhere;
+}
+
 .copyBox {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 48px;

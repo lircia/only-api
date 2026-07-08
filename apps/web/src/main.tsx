@@ -64,12 +64,16 @@ function App() {
   const [setupRequired, setSetupRequired] = useState(false);
   const [active, setActive] = useState<NavKey>('dashboard');
   const [loading, setLoading] = useState(true);
+  const [bootError, setBootError] = useState('');
   const [notice, setNotice] = useState('');
 
   const api = useMemo(() => makeApi(token, setNotice), [token]);
 
   async function refreshBootstrap() {
     const data = await api.get('/api/public/bootstrap', false);
+    if (typeof data.setupRequired !== 'boolean' || !data.settings) {
+      throw new Error('前端没有拿到后端初始化信息，请检查 Pages 的 VITE_API_BASE_URL 是否指向 Worker 域名');
+    }
     setSetupRequired(data.setupRequired);
     setSettings({ ...defaultSettings, ...data.settings });
   }
@@ -88,9 +92,15 @@ function App() {
 
   useEffect(() => {
     (async () => {
-      await refreshBootstrap();
-      await refreshMe();
-      setLoading(false);
+      try {
+        setBootError('');
+        await refreshBootstrap();
+        await refreshMe();
+      } catch (error) {
+        setBootError(error instanceof Error ? error.message : '控制台初始化失败');
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [token]);
 
@@ -112,6 +122,7 @@ function App() {
   const admin = user?.role === 'admin' || user?.role === 'super_admin';
 
   if (loading) return <Shell title="加载中"><div className="centerPanel"><RefreshCw className="spin" />正在准备控制台</div></Shell>;
+  if (bootError) return <Shell title="连接失败"><BootError message={bootError} /></Shell>;
   if (setupRequired) return <Shell title="初始化"><Setup settings={settings} api={api} onDone={acceptSession} /></Shell>;
   if (!user) return <Shell title={settings.siteName}><Auth settings={settings} api={api} onLogin={acceptSession} /></Shell>;
 
@@ -162,6 +173,22 @@ function App() {
         {active === 'channels' && admin && <Channels api={api} />}
         {active === 'workerUsage' && admin && <WorkerUsage api={api} />}
       </main>
+    </div>
+  );
+}
+
+function BootError({ message }: { message: string }) {
+  return (
+    <div className="panel narrow">
+      <h2>前端没有连上后端</h2>
+      <p>{message}</p>
+      <div className="checkList">
+        <span>检查 Pages 环境变量 `VITE_API_BASE_URL` 是否填写为 Worker 域名。</span>
+        <span>修改 Pages 环境变量后，需要重新部署 Pages。</span>
+        <span>检查 Worker 是否已经绑定 D1：变量名 `DB`，数据库 `api_relay`。</span>
+        <span>检查 Worker 变量 `APP_ORIGIN` 是否填写为 Pages 域名。</span>
+      </div>
+      <button className="primaryBtn" onClick={() => location.reload()}><RefreshCw />重新加载</button>
     </div>
   );
 }
@@ -493,15 +520,23 @@ type ApiClient = ReturnType<typeof makeApi>;
 function makeApi(token: string, setNotice: (message: string) => void) {
   async function request(path: string, method: string, body?: unknown, auth = true): Promise<any> {
     setNotice('');
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 15000);
     const response = await fetch(`${apiBaseUrl}${path}`, {
       method,
+      signal: controller.signal,
       headers: {
         ...(body ? { 'content-type': 'application/json' } : {}),
         ...(auth && token ? { authorization: `Bearer ${token}` } : {})
       },
       body: body ? JSON.stringify(body) : undefined
-    });
-    const data: any = await response.json().catch(() => ({}));
+    }).finally(() => window.clearTimeout(timer));
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const text = await response.text().catch(() => '');
+      throw new Error(text ? `后端返回的不是 JSON：${text.slice(0, 120)}` : '后端返回的不是 JSON，请检查 Worker 地址');
+    }
+    const data: any = await response.json();
     if (!response.ok) {
       const message = data.error || '请求失败';
       setNotice(message);
