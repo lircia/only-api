@@ -23,6 +23,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
 .app {
   min-height: 100vh;
   display: grid;
@@ -385,6 +390,24 @@ th {
 
 .successText {
   color: #1f6f5b;
+}
+
+.errorText {
+  color: #a43f3f;
+  background: #fff0ef;
+  border: 1px solid #f0c7c3;
+  border-radius: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.hintText {
+  margin: 0;
+  color: #6b756e;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .checkList {

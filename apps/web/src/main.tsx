@@ -212,10 +212,20 @@ function Shell({ title, children }: { title: string; children: React.ReactNode }
 
 function Setup({ settings, api, onDone }: { settings: SettingsShape; api: ApiClient; onDone: (token: string, user: User) => void }) {
   const [form, setForm] = useState({ secret: '', email: '', name: 'Super Admin', password: '', siteName: settings.siteName, appMode: 'self' });
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    const data = await api.post('/api/setup', form, false);
-    onDone(data.token, data.user);
+    setError('');
+    setBusy(true);
+    try {
+      const data = await api.post('/api/setup', form, false);
+      onDone(data.token, data.user);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : '初始化失败，请检查 Worker 变量和 D1 绑定');
+    } finally {
+      setBusy(false);
+    }
   }
   return (
     <form className="panel narrow" onSubmit={submit}>
@@ -227,7 +237,9 @@ function Setup({ settings, api, onDone }: { settings: SettingsShape; api: ApiCli
       <Input label="密码" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} />
       <Input label="站点名称" value={form.siteName} onChange={(siteName) => setForm({ ...form, siteName })} />
       <Segmented value={form.appMode} options={[['self', '自用配置'], ['multi', '多人配置']]} onChange={(appMode) => setForm({ ...form, appMode })} />
-      <button className="primaryBtn"><Shield />完成初始化</button>
+      <p className="hintText">密码至少 8 位，管理员密钥必须和 Worker 变量 `ADMIN_SETUP_SECRET` 完全一致。</p>
+      {error && <p className="errorText">{error}</p>}
+      <button className="primaryBtn" disabled={busy}><Shield />{busy ? '正在初始化' : '完成初始化'}</button>
     </form>
   );
 }
@@ -236,17 +248,28 @@ function Auth({ settings, api, onLogin }: { settings: SettingsShape; api: ApiCli
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [form, setForm] = useState({ email: '', name: '', password: '' });
   const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   const captchaToken = useTurnstile(settings.captchaEnabled && mode === 'register' ? settings.captchaSiteKey : '');
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (mode === 'login') {
-      const data = await api.post('/api/auth/login', form, false);
-      onLogin(data.token, data.user);
-      return;
+    setError('');
+    setMessage('');
+    setBusy(true);
+    try {
+      if (mode === 'login') {
+        const data = await api.post('/api/auth/login', form, false);
+        onLogin(data.token, data.user);
+        return;
+      }
+      const data = await api.post('/api/auth/register', { ...form, captchaToken: captchaToken.token }, false);
+      setMessage(data.message || '注册成功，请检查邮箱');
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : '请求失败');
+    } finally {
+      setBusy(false);
     }
-    const data = await api.post('/api/auth/register', { ...form, captchaToken: captchaToken.token }, false);
-    setMessage(data.message || '注册成功，请检查邮箱');
   }
 
   return (
@@ -259,7 +282,8 @@ function Auth({ settings, api, onLogin }: { settings: SettingsShape; api: ApiCli
       <Input label="邮箱" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} />
       <Input label="密码" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} />
       {settings.captchaEnabled && mode === 'register' && <div className="turnstile" ref={captchaToken.ref}>{settings.captchaSiteKey ? '' : '未配置 Turnstile Site Key'}</div>}
-      <button className="primaryBtn">{mode === 'login' ? <LogOut /> : <CheckCircle2 />}{mode === 'login' ? '登录' : '创建账号'}</button>
+      {error && <p className="errorText">{error}</p>}
+      <button className="primaryBtn" disabled={busy}>{mode === 'login' ? <LogOut /> : <CheckCircle2 />}{busy ? '请稍候' : mode === 'login' ? '登录' : '创建账号'}</button>
       {message && <p className="successText">{message}</p>}
     </form>
   );
@@ -522,15 +546,25 @@ function makeApi(token: string, setNotice: (message: string) => void) {
     setNotice('');
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 15000);
-    const response = await fetch(`${apiBaseUrl}${path}`, {
-      method,
-      signal: controller.signal,
-      headers: {
-        ...(body ? { 'content-type': 'application/json' } : {}),
-        ...(auth && token ? { authorization: `Bearer ${token}` } : {})
-      },
-      body: body ? JSON.stringify(body) : undefined
-    }).finally(() => window.clearTimeout(timer));
+    let response: Response;
+    try {
+      response = await fetch(`${apiBaseUrl}${path}`, {
+        method,
+        signal: controller.signal,
+        headers: {
+          ...(body ? { 'content-type': 'application/json' } : {}),
+          ...(auth && token ? { authorization: `Bearer ${token}` } : {})
+        },
+        body: body ? JSON.stringify(body) : undefined
+      });
+    } catch (requestError) {
+      if (requestError instanceof DOMException && requestError.name === 'AbortError') {
+        throw new Error('请求后端超时，请检查 Worker 是否部署成功、Pages 的 VITE_API_BASE_URL 是否正确');
+      }
+      throw new Error('请求后端失败，请检查 Worker 域名、CORS 和 Pages 的 VITE_API_BASE_URL');
+    } finally {
+      window.clearTimeout(timer);
+    }
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
       const text = await response.text().catch(() => '');
