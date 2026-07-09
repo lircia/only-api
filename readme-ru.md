@@ -180,4 +180,4 @@ These variables are not required for normal deployment. They are for users who a
 | `WXPUSHER_CONTENT_TYPE` | Variable | `1` text, `2` HTML, `3` Markdown; default `1` |
 | `WXPUSHER_VERIFY_PAY_TYPE` | Variable | `0` no check, `1` paid users, `2` unpaid/expired users |
 
-此仓库的维护为无限期不维护。
+Этот репозиторий бессрочно не поддерживается.
