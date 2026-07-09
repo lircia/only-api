@@ -1,12 +1,16 @@
 # Only API
 
-Only API is a Cloudflare Workers + Pages API gateway for OpenAI-compatible providers. It includes user login, registration, API keys, channel management, model discovery, usage statistics, admin settings, scheduled channel checks, Workers usage checks, and optional Telegram / WxPusher notifications.
+Only API is a Cloudflare Workers + Pages API gateway for OpenAI-compatible APIs. It provides a Worker backend, a Pages frontend, D1 storage, user login, registration, API key distribution, channel management, a Model Square, usage statistics, Workers usage monitoring, and optional Telegram / WxPusher notifications.
 
-The repository is designed for GitHub hosting and Cloudflare dashboard deployment. You do not need to edit `wrangler.toml`; this project does not use `wrangler.toml`.
+Have you ever wanted to use an API from a provider or platform, but found that the provider endpoint has high local latency or is sometimes unreachable? This project can partially help with that problem by forwarding API requests through Cloudflare.
+
+We do not provide any API key or upstream API endpoint. This platform is only for API forwarding.
+
+You may use a Cloudflare domain preferred-route or preferred-IP service to improve speed. The frontend does not call upstream providers directly, so the frontend domain usually does not need optimization. You can find optimization links through web search.
+
+This repository is designed for GitHub hosting and Cloudflare dashboard deployment. It does not use `wrangler.toml`.
 
 ## Languages
-
-The default README is English. Other README files also include deployment steps:
 
 - [中文](readme-zh.md)
 - [日本語](readme-ja.md)
@@ -17,41 +21,36 @@ The default README is English. Other README files also include deployment steps:
 
 ## Project Paths
 
-| Purpose | Path | Notes |
-| --- | --- | --- |
-| Pages frontend | `apps/web` | Admin console, login, registration, usage pages |
-| Worker backend | `apps/api/src/index.ts` | API, auth, forwarding, scheduled jobs |
-| D1 schema SQL | `apps/api/migrations/0001_initial.sql` | Paste into the Cloudflare D1 console |
-| Dependencies | `package.json` | Repository root |
+| Purpose | Path |
+| --- | --- |
+| Pages frontend | `apps/web` |
+| Worker backend | `apps/api/src/index.ts` |
+| D1 schema SQL | `apps/api/migrations/0001_initial.sql` |
+| Root dependency file | `package.json` |
 
-## Features
+## Main Features
 
-- First visit setup with `ADMIN_SETUP_SECRET`.
-- Super admin setup page disappears after the first super admin is created.
+- First super-admin setup with `ADMIN_SETUP_SECRET`.
 - Self-use mode and multi-user mode.
-- Registration can be enabled or disabled.
-- Email verification toggle:
-  - Self-use mode defaults to off.
-  - Multi-user mode defaults to on.
-- Email code registration: 13-digit code, 13-minute validity, 3 attempts, and 67-second resend cooldown.
-- Optional email-domain validation and numeric QQ email prefix enforcement, both enabled by default.
-- Optional Cloudflare Turnstile verification.
-- User API key creation and revocation.
+- Registration switch, email-code verification, confirm password, email suffix validation, and numeric QQ email prefix validation.
+- Optional Cloudflare Turnstile. The frontend Site Key is a Pages variable, and the backend Secret Key is a Worker variable.
+- User API keys use the `oi-only-` prefix.
 - OpenAI-compatible `/v1/*` forwarding.
 - No user quota enforcement.
-- Channel settings, channel testing, model syncing from `/models`.
-- Separate Model Square for copying, renaming, and hiding visible model names.
-- Usage table for 3 hours, 1 day, 7 days, 15 days, and all-time summary.
-- Workers usage checks with clear variable-missing feedback.
-- Frontend time display is adjusted by UTC+8.
+- Channel testing and model syncing from upstream `/models`.
+- Model Square with one model per row, editable display names, and hidden models.
+- Usage statistics for 3 hours, 1 day, 7 days, 15 days, and all time.
+- Workers usage monitoring shows used percent and remaining percent.
+- Workers usage is checked every 6 hours by default and can be pushed to Telegram or WxPusher.
+- Frontend time display is adjusted to UTC+8.
+- Built-in themes: black-white, light blue-white, yellow-purple, green-red, and pink-orange.
+- Optional frontend background image by URL.
 
-## Deployment Step 1: Deploy Worker
+## Deployment 1: Deploy Worker
 
-In Cloudflare Workers & Pages:
+In Cloudflare Workers & Pages, create or open the Worker project and connect this GitHub repository.
 
-1. Create a Worker.
-2. Connect your GitHub repository.
-3. Use these build settings.
+Use these Worker build settings:
 
 | Setting | Value |
 | --- | --- |
@@ -59,21 +58,19 @@ In Cloudflare Workers & Pages:
 | Build command | `npm ci` |
 | Deploy command | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
 
-`--keep-vars` helps preserve variables and secrets that you set in the Cloudflare dashboard.
+`--keep-vars` helps preserve Worker variables and secrets. If your variables or D1 binding disappear after an update, make sure you are redeploying the same Worker, not creating a new Worker, then recheck the Worker bindings page.
 
-After deploying the Worker, continue with D1 and variable binding. If D1 bindings disappear after a redeploy, bind `DB -> your D1 database` again in the Worker settings.
-
-## Deployment Step 2: Create D1
+## Deployment 2: Create D1 Database
 
 Create a D1 database in the Cloudflare dashboard.
 
-Recommended name for new deployments:
+Recommended database name:
 
 ```txt
 only_api
 ```
 
-If you used a different D1 database name, that is also fine. The code only requires the Worker binding name below:
+The Worker binding name must be:
 
 ```txt
 DB
@@ -85,90 +82,89 @@ Open the D1 console and execute all SQL from:
 apps/api/migrations/0001_initial.sql
 ```
 
-Tables created:
+Tables created by the SQL:
 
 | Table | Purpose |
 | --- | --- |
-| `users` | Users, admins, super admins |
-| `email_verifications` | Email verification tokens |
+| `users` | Users, admins, and super admins |
+| `email_verifications` | 13-digit email verification codes |
 | `sessions` | Login sessions |
 | `api_keys` | User API keys |
-| `channels` | Upstream provider channels |
-| `model_catalog` | Synced models |
-| `usage_logs` | Forwarding logs, status, latency, token usage |
+| `channels` | Upstream API channels |
+| `model_catalog` | Model Square models |
+| `usage_logs` | API forwarding usage records |
 | `worker_usage_snapshots` | Workers usage snapshots |
-| `system_settings` | Site settings |
+| `system_settings` | System settings |
 
-## Deployment Step 3: Bind Worker Resources
+## Deployment 3: Bind Worker Resources And Variables
 
-In Worker settings, bind:
+Bind the D1 database in Worker settings:
 
-| Type | Variable name | Value |
+| Type | Name | Value |
 | --- | --- | --- |
 | D1 database | `DB` | your D1 database |
 
-Optional:
+Required Worker variables:
 
-| Type | Variable name | Purpose |
+| Name | Type | Purpose |
 | --- | --- | --- |
-| KV namespace | `CACHE` | reserved cache binding |
+| `APP_ORIGIN` | Variable | Your Pages frontend URL |
+| `ADMIN_SETUP_SECRET` | Secret | Password for first super-admin setup |
+| `JWT_SECRET` | Secret | Long random session secret |
 
-Required variables or secrets:
+Recommended Worker variable:
 
-| Name | Type | Notes |
+| Name | Type | Purpose |
 | --- | --- | --- |
-| `APP_ORIGIN` | Variable | Pages frontend URL, for example `https://xxx.pages.dev` |
-| `ADMIN_SETUP_SECRET` | Secret | setup password for the first super admin |
-| `JWT_SECRET` | Secret | long random string for sessions |
+| `API_PUBLIC_BASE_URL` | Variable | Public Worker URL shown in the frontend |
 
-Recommended:
+Optional email variables:
 
-| Name | Type | Notes |
-| --- | --- | --- |
-| `API_PUBLIC_BASE_URL` | Variable | public Worker URL shown in the frontend |
-
-Optional email verification:
-
-| Name | Type | Notes |
+| Name | Type | Purpose |
 | --- | --- | --- |
 | `RESEND_API_KEY` | Secret | Resend API key |
-| `RESEND_FROM` | Variable | for example `Only API <noreply@example.com>` |
+| `RESEND_FROM` | Variable | Sender, for example `Only API <noreply@example.com>` |
 
-Optional Turnstile:
+Optional Turnstile Worker variable:
 
-| Name | Type | Notes |
+| Name | Type | Purpose |
 | --- | --- | --- |
-| `TURNSTILE_SECRET_KEY` | Secret | Cloudflare Turnstile secret key |
+| `TURNSTILE_SECRET_KEY` | Secret | Cloudflare Turnstile Secret Key |
 
-Optional Workers usage check:
+Optional Workers usage variables:
 
-| Name | Type | Notes |
+| Name | Type | Purpose |
 | --- | --- | --- |
 | `CF_ACCOUNT_ID` | Variable | Cloudflare account ID |
-| `CF_API_TOKEN` | Secret | token that can read Workers usage |
+| `CF_API_TOKEN` | Secret | API token with permission to read Workers usage |
+| `WORKERS_DAILY_REQUEST_LIMIT` | Variable | Daily request limit used for percent calculation, default `100000` |
 
-If these Workers usage variables are missing, the dashboard will show a clear “please configure variables” message.
+Accepted aliases are `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CF_ZONE_ID`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN`, and `CLOUDFLARE_TOKEN`.
 
-Notification variables:
+Telegram notification variables:
 
-Telegram required variables:
-
-| Name | Type | Notes |
+| Name | Type | Purpose |
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Secret | Telegram bot token |
-| `TELEGRAM_CHAT_ID` | Variable | Telegram chat or group ID |
+| `TELEGRAM_CHAT_ID` | Variable | Telegram chat, group, or channel ID |
 
-WxPusher required variables:
+WxPusher notification variables:
 
-| Name | Type | Notes |
+| Name | Type | Purpose |
 | --- | --- | --- |
 | `WXPUSHER_APP_TOKEN` | Secret | WxPusher AppToken |
-| `WXPUSHER_UIDS` | Variable | comma-separated WxPusher user IDs; required unless `WXPUSHER_TOPIC_IDS` is set |
-| `WXPUSHER_TOPIC_IDS` | Variable | comma-separated WxPusher topic IDs; required unless `WXPUSHER_UIDS` is set |
+| `WXPUSHER_UIDS` | Variable | Comma-separated UID list, required unless topic IDs are used |
+| `WXPUSHER_TOPIC_IDS` | Variable | Comma-separated topic ID list, required unless UIDs are used |
 
-## Deployment Step 4: Deploy Pages
+Optional scheduled trigger:
 
-In Cloudflare Pages:
+Add a Worker Cron Trigger in the Cloudflare dashboard. For example, run every hour. The app itself only performs the Workers usage query when the configured interval has passed. The default interval is 360 minutes.
+
+## Deployment 4: Deploy Pages Frontend
+
+In Cloudflare Pages, connect the same GitHub repository.
+
+Use these Pages build settings:
 
 | Setting | Value |
 | --- | --- |
@@ -178,73 +174,60 @@ In Cloudflare Pages:
 | Build output directory | `apps/web/dist` |
 | Node.js version | `20` or higher |
 
-Required Pages environment variable:
+Required Pages variable:
 
 ```txt
 VITE_API_BASE_URL=https://your-worker-domain.workers.dev
 ```
 
-If you use a custom Worker domain:
+Optional Pages variables:
 
 ```txt
-VITE_API_BASE_URL=https://api.example.com
+VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
+VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
 ```
 
-After Pages is deployed, set Worker variable `APP_ORIGIN` to your Pages URL.
+After Pages is deployed, set Worker variable `APP_ORIGIN` to the Pages URL.
 
 ## First Setup
 
-Open your Pages frontend URL. The first visit shows the setup page.
+Open the Pages frontend URL. The first visit shows the setup page.
 
 You need:
 
 - `ADMIN_SETUP_SECRET`
-- super admin email
-- super admin password
+- super-admin email
+- super-admin password
 - site name
 - self-use mode or multi-user mode
 
-After setup:
-
-- setup page disappears
-- `ADMIN_SETUP_SECRET` is no longer used by the frontend setup flow
-- later changes happen inside the admin dashboard
+After the super admin is created, the setup page closes and the setup secret is no longer used by the frontend setup flow.
 
 ## Registration Verification
 
-When email verification is enabled, registration no longer sends a verification link. It sends a 13-digit numeric code by email.
+When email verification is enabled, registration sends a 13-digit numeric code by email instead of a link.
 
 - The code is valid for 13 minutes.
-- Each code allows 3 input attempts.
-- The verification page includes a “resend” button.
-- Resending is limited by a 67-second cooldown.
-- The registration form includes a confirm-password field.
-- Email suffix validation is enabled by default for common providers such as `qq.com`, `163.com`, `gmail.com`, `outlook.com`, `yeah.net`, `hotmail.com`, and `126.com`.
-- QQ email addresses must use a numeric QQ-number prefix by default.
-- Admins can disable email suffix validation and numeric QQ prefix enforcement in System Settings.
+- Each code allows 3 attempts.
+- Resend cooldown is 67 seconds.
+- Self-use mode defaults email verification to off.
+- Multi-user mode defaults email verification to on.
+- Email suffix validation and numeric QQ email prefix validation are enabled by default.
 
-## Channel Base URL
+## Workers Usage And Notifications
 
-Enter the upstream API base URL at the API version level.
+Workers usage monitoring requires the Cloudflare account ID and API token variables. If they are missing, the frontend shows a configuration message.
 
-Examples:
+The page displays:
 
-| Provider | Channel Base URL |
-| --- | --- |
-| OpenAI | `https://api.openai.com/v1` |
-| OpenRouter | `https://openrouter.ai/api/v1` |
-| Other OpenAI-compatible providers | usually `https://domain/v1` |
+- current used percent
+- current remaining percent
+- daily request limit
+- snapshot time range
 
-The backend normalizes common suffixes:
+The percent is calculated from the last 24 hours of Worker requests divided by `WORKERS_DAILY_REQUEST_LIMIT`. The default limit is `100000`.
 
-```txt
-.../v1
-.../v1/
-.../v1/chat
-.../v1/chat/completions
-```
-
-They are normalized to a usable API root before forwarding and model syncing.
+Automatic checks default to every 6 hours. Clicking “collect now” also sends a notification immediately if Telegram or WxPusher variables are configured.
 
 ## API Usage
 
@@ -260,8 +243,6 @@ Header:
 Authorization: Bearer oi-only-...
 ```
 
-New API keys use the `oi-only-` prefix. Older keys generated before this prefix change remain valid.
-
 SillyTavern recommended settings:
 
 ```txt
@@ -271,55 +252,52 @@ API Key: your full oi-only-... key
 Model: copy a model name from Model Square
 ```
 
-The backend accepts these key formats:
+## Channel Base URL
 
-```txt
-Authorization: Bearer oi-only-...
-Authorization: oi-only-...
-x-api-key: oi-only-...
-api-key: oi-only-...
-```
+Use the upstream API root at the version level.
+
+| Provider | Channel Base URL |
+| --- | --- |
+| OpenAI | `https://api.openai.com/v1` |
+| OpenRouter | `https://openrouter.ai/api/v1` |
+| Other compatible providers | usually `https://domain/v1` |
+
+The backend normalizes common suffixes such as `/v1`, `/v1/`, `/v1/chat`, and `/v1/chat/completions`.
 
 ## Troubleshooting
 
-If the frontend keeps loading:
+If the frontend cannot connect:
 
 1. Check Pages variable `VITE_API_BASE_URL`.
 2. Make sure it points to the Worker URL, not the Pages URL.
-3. Redeploy Pages after changing environment variables.
-4. Check Worker D1 binding: `DB`.
-5. Check Worker variables: `ADMIN_SETUP_SECRET`, `JWT_SECRET`, `APP_ORIGIN`.
+3. Redeploy Pages after changing Pages variables.
+4. Check Worker binding `DB`.
+5. Check Worker variables `APP_ORIGIN`, `ADMIN_SETUP_SECRET`, and `JWT_SECRET`.
 
 If SillyTavern says Unauthorized:
 
-1. Use the full API key, not the key prefix.
-2. Select OpenAI Compatible / Custom OpenAI-compatible.
-3. Do not use an official OpenRouter preset unless you want to bypass Only API.
-4. Make sure there are no spaces before or after the key.
+1. Use the full key, not the visible key prefix.
+2. Use OpenAI Compatible or Custom OpenAI-compatible mode.
+3. Make sure there are no spaces before or after the key.
+4. Confirm the selected model name exists in Model Square.
 
-## Optional Local Commands
+## Advanced Optional Variables
 
-```bash
-npm ci
-npm run typecheck
-npm run build:web
-npm run deploy:api
-```
+These are not required for normal deployment.
 
-## Advanced Optional Push Variables
+| Name | Purpose |
+| --- | --- |
+| `TELEGRAM_PARSE_MODE` | `HTML`, `MarkdownV2`, or `Markdown` |
+| `TELEGRAM_MESSAGE_THREAD_ID` | Telegram forum topic thread ID |
+| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Telegram direct message topic ID |
+| `TELEGRAM_DISABLE_NOTIFICATION` | Silent Telegram notification |
+| `TELEGRAM_PROTECT_CONTENT` | Protect forwarded or saved Telegram content |
+| `TELEGRAM_LINK_PREVIEW_DISABLED` | Disable Telegram link previews |
+| `WXPUSHER_URL` | Link attached to the WxPusher message |
+| `WXPUSHER_CONTENT_TYPE` | `1` text, `2` HTML, `3` Markdown |
+| `WXPUSHER_VERIFY_PAY_TYPE` | WxPusher paid-user filter |
+| `CF_WORKERS_DAILY_REQUEST_LIMIT` | Alias for daily request limit |
+| `CLOUDFLARE_WORKERS_DAILY_REQUEST_LIMIT` | Alias for daily request limit |
 
-These variables are not required for normal deployment. They are for users who already understand Telegram forum topics, message formatting, link previews, or WxPusher paid-topic behavior.
-
-| Name | Type | Notes |
-| --- | --- | --- |
-| `TELEGRAM_PARSE_MODE` | Variable | `HTML`, `MarkdownV2`, or `Markdown` |
-| `TELEGRAM_MESSAGE_THREAD_ID` | Variable | Telegram group forum topic thread ID |
-| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Variable | Telegram direct messages topic ID |
-| `TELEGRAM_DISABLE_NOTIFICATION` | Variable | boolean, silent notification |
-| `TELEGRAM_PROTECT_CONTENT` | Variable | boolean, protect forwarded/saved content |
-| `TELEGRAM_LINK_PREVIEW_DISABLED` | Variable | boolean, disable link previews |
-| `WXPUSHER_URL` | Variable | link attached to the message |
-| `WXPUSHER_CONTENT_TYPE` | Variable | `1` text, `2` HTML, `3` Markdown; default `1` |
-| `WXPUSHER_VERIFY_PAY_TYPE` | Variable | `0` no check, `1` paid users, `2` unpaid/expired users |
-
+Disclaimer: This project is only an API forwarding tool. You are responsible for upstream API keys, provider terms, costs, and legal compliance.
 This repository is indefinitely unmaintained.

@@ -115,12 +115,13 @@ INSERT OR IGNORE INTO system_settings (key, value) VALUES
   ('emailVerificationEnabled', 'false'),
   ('captchaEnabled', 'false'),
   ('captchaSiteKey', '""'),
-  ('themeName', '"blue-white"'),
+  ('themeName', '"black-white"'),
+  ('backgroundImageUrl', '""'),
   ('emailDomainValidationEnabled', 'true'),
   ('qqEmailNumericPrefixRequired', 'true'),
   ('healthCheckIntervalMinutes', '60'),
-  ('workerUsageIntervalMinutes', '60'),
+  ('workerUsageIntervalMinutes', '360'),
   ('lastHealthCheckAt', '""'),
   ('lastWorkerUsageCheckAt', '""'),
   ('defaultChannelStrategy', '"priority"'),
-  ('notifyWorkerUsage', 'false');
+  ('notifyWorkerUsage', 'true');

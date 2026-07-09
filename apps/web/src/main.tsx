@@ -41,6 +41,7 @@ type SettingsShape = {
   notifyWorkerUsage: boolean;
   apiPublicBaseUrl?: string;
   themeName: string;
+  backgroundImageUrl: string;
   emailDomainValidationEnabled: boolean;
   qqEmailNumericPrefixRequired: boolean;
 };
@@ -49,6 +50,8 @@ type NavKey = 'dashboard' | 'keys' | 'usage' | 'models' | 'settings' | 'users' |
 
 const tokenStoreKey = 'only-api-token';
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim();
+const fallbackBackgroundImageUrl = (import.meta.env.VITE_BACKGROUND_IMAGE_URL || '').trim();
 const defaultSettings: SettingsShape = {
   siteName: 'Only API',
   appMode: 'self',
@@ -57,20 +60,21 @@ const defaultSettings: SettingsShape = {
   captchaEnabled: false,
   captchaSiteKey: '',
   healthCheckIntervalMinutes: 60,
-  workerUsageIntervalMinutes: 60,
+  workerUsageIntervalMinutes: 360,
   defaultChannelStrategy: 'priority',
-  notifyWorkerUsage: false,
-  themeName: 'blue-white',
+  notifyWorkerUsage: true,
+  themeName: 'black-white',
+  backgroundImageUrl: '',
   emailDomainValidationEnabled: true,
   qqEmailNumericPrefixRequired: true
 };
 
 const themeOptions = [
-  { key: 'blue-white', label: '蓝白', colors: ['#2563eb', '#ffffff'] },
-  { key: 'black-white', label: '黑白', colors: ['#111111', '#ffffff'] },
-  { key: 'yellow-purple', label: '黄紫', colors: ['#facc15', '#6d28d9'] },
-  { key: 'green-red', label: '绿红', colors: ['#16a34a', '#dc2626'] },
-  { key: 'pink-orange', label: '粉橙', colors: ['#ec4899', '#f97316'] }
+  { key: 'black-white', label: '黑白', colors: ['#111111', '#ffffff', '#eeeeee', '#222222'] },
+  { key: 'blue-white', label: '蓝白', colors: ['#7dd3fc', '#ffffff', '#e0f7ff', '#0891b2'] },
+  { key: 'yellow-purple', label: '黄紫', colors: ['#fff200', '#7c3aed', '#7c3aed', '#fff200'] },
+  { key: 'green-red', label: '绿红', colors: ['#dffbea', '#b00020', '#ffffff', '#8b0000'] },
+  { key: 'pink-orange', label: '粉橙', colors: ['#fb923c', '#ffe4ec', '#f97316', '#f9a8d4'] }
 ];
 
 function App() {
@@ -86,8 +90,20 @@ function App() {
   const api = useMemo(() => makeApi(token, setNotice), [token]);
 
   useEffect(() => {
-    document.documentElement.dataset.theme = settings.themeName || 'blue-white';
+    document.documentElement.dataset.theme = settings.themeName || 'black-white';
   }, [settings.themeName]);
+
+  useEffect(() => {
+    const raw = (settings.backgroundImageUrl || fallbackBackgroundImageUrl || '').trim();
+    if (!raw) {
+      document.documentElement.style.setProperty('--app-bg-image', 'none');
+      document.documentElement.dataset.hasBgImage = 'false';
+      return;
+    }
+    const safeUrl = raw.replace(/["\\\n\r]/g, '');
+    document.documentElement.style.setProperty('--app-bg-image', `url("${safeUrl}")`);
+    document.documentElement.dataset.hasBgImage = 'true';
+  }, [settings.backgroundImageUrl]);
 
   async function refreshBootstrap() {
     const data = await api.get('/api/public/bootstrap', false);
@@ -157,6 +173,8 @@ function App() {
     { key: 'workerUsage', label: 'Workers 用量', icon: <Shield />, admin: true }
   ];
 
+  const publicApiBase = settings.apiPublicBaseUrl || apiBaseUrl || location.origin;
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -185,7 +203,7 @@ function App() {
           {notice && <div className="notice">{notice}</div>}
         </header>
         {active === 'dashboard' && <Dashboard api={api} />}
-        {active === 'keys' && <ApiKeys api={api} publicBase={settings.apiPublicBaseUrl || location.origin} />}
+        {active === 'keys' && <ApiKeys api={api} publicBase={publicApiBase} />}
         {active === 'usage' && <Usage api={api} />}
         {active === 'models' && <Models api={api} admin={admin} />}
         {active === 'settings' && admin && <AdminSettings api={api} settings={settings} onSaved={(next) => setSettings({ ...settings, ...next })} />}
@@ -273,7 +291,7 @@ function Auth({ settings, api, onLogin }: { settings: SettingsShape; api: ApiCli
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const captchaToken = useTurnstile(settings.captchaEnabled && mode === 'register' ? settings.captchaSiteKey : '');
+  const captchaToken = useTurnstile(settings.captchaEnabled && mode === 'register' ? turnstileSiteKey : '');
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -365,7 +383,7 @@ function Auth({ settings, api, onLogin }: { settings: SettingsShape; api: ApiCli
       <Input label="邮箱" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} />
       <Input label="密码" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} />
       {mode === 'register' && <Input label="确认密码" type="password" value={form.confirmPassword} onChange={(confirmPassword) => setForm({ ...form, confirmPassword })} />}
-      {settings.captchaEnabled && mode === 'register' && <div className="turnstile" ref={captchaToken.ref}>{settings.captchaSiteKey ? '' : '未配置 Turnstile Site Key'}</div>}
+      {settings.captchaEnabled && mode === 'register' && <div className="turnstile" ref={captchaToken.ref}>{turnstileSiteKey ? '' : '未配置 Pages 变量 VITE_TURNSTILE_SITE_KEY'}</div>}
       {error && <p className="errorText">{error}</p>}
       <button className="primaryBtn" disabled={busy}>{mode === 'login' ? <LogOut /> : <CheckCircle2 />}{busy ? '请稍候' : mode === 'login' ? '登录' : '创建账号'}</button>
       {message && <p className="successText">{message}</p>}
@@ -609,7 +627,7 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
       <div className="panel settingsGrid">
         <h2>系统设置</h2>
         <Input label="站点名称" value={form.siteName} onChange={(siteName) => setForm({ ...form, siteName })} />
-        <ThemePicker value={form.themeName || 'blue-white'} onChange={(themeName) => {
+        <ThemePicker value={form.themeName || 'black-white'} onChange={(themeName) => {
           document.documentElement.dataset.theme = themeName;
           setForm({ ...form, themeName });
         }} />
@@ -620,7 +638,8 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
         <Toggle label="邮箱后缀验证" checked={form.emailDomainValidationEnabled} onChange={(emailDomainValidationEnabled) => setForm({ ...form, emailDomainValidationEnabled })} />
         <Toggle label="QQ 邮箱强制数字前缀" checked={form.qqEmailNumericPrefixRequired} onChange={(qqEmailNumericPrefixRequired) => setForm({ ...form, qqEmailNumericPrefixRequired })} />
         <Toggle label="人机验证" checked={form.captchaEnabled} onChange={(captchaEnabled) => setForm({ ...form, captchaEnabled })} />
-        <Input label="Turnstile Site Key" value={form.captchaSiteKey || ''} onChange={(captchaSiteKey) => setForm({ ...form, captchaSiteKey })} />
+        <p className="hintText">Turnstile Site Key 请填写到 Pages 变量 `VITE_TURNSTILE_SITE_KEY`，Secret Key 请填写到 Worker 变量 `TURNSTILE_SECRET_KEY`。</p>
+        <Input label="背景图片 URL" value={form.backgroundImageUrl || ''} onChange={(backgroundImageUrl) => setForm({ ...form, backgroundImageUrl })} />
         <Input label="渠道检测间隔（分钟）" type="number" value={String(form.healthCheckIntervalMinutes)} onChange={(value) => setForm({ ...form, healthCheckIntervalMinutes: Number(value) })} />
         <Input label="Workers 用量检测间隔（分钟）" type="number" value={String(form.workerUsageIntervalMinutes)} onChange={(value) => setForm({ ...form, workerUsageIntervalMinutes: Number(value) })} />
         <Toggle label="推送 Workers 用量" checked={form.notifyWorkerUsage} onChange={(notifyWorkerUsage) => setForm({ ...form, notifyWorkerUsage })} />
@@ -646,8 +665,7 @@ function ThemePicker({ value, onChange }: { value: string; onChange: (value: str
         {themeOptions.map((theme) => (
           <button key={theme.key} className={value === theme.key ? 'active' : ''} onClick={() => onChange(theme.key)}>
             <i>
-              <b style={{ background: theme.colors[0] }} />
-              <b style={{ background: theme.colors[1] }} />
+              {theme.colors.map((color, index) => <b key={`${theme.key}-${index}`} style={{ background: color }} />)}
             </i>
             {theme.label}
           </button>
@@ -739,11 +757,15 @@ function Channels({ api }: { api: ApiClient }) {
 function WorkerUsage({ api }: { api: ApiClient }) {
   const [rows, setRows] = useState<any[]>([]);
   const [configured, setConfigured] = useState(true);
+  const [message, setMessage] = useState('');
+  const [quotaLimit, setQuotaLimit] = useState(100000);
   const [busy, setBusy] = useState(false);
   async function load() {
     const data = await api.get('/api/admin/worker-usage');
     setConfigured(data.configured !== false);
-    setRows(data.snapshots);
+    setMessage(data.message || '');
+    setQuotaLimit(Number(data.quotaLimit || 100000));
+    setRows(data.snapshots || []);
   }
   useLoad(load, []);
   async function capture() {
@@ -755,11 +777,19 @@ function WorkerUsage({ api }: { api: ApiClient }) {
       setBusy(false);
     }
   }
+  const latest = rows[0];
   return (
     <section className="content">
       <div className="toolbar"><h2>Workers 用量监测</h2><button className="primaryBtn" onClick={capture} disabled={busy || !configured}><RefreshCw className={busy ? 'spin' : ''} />{busy ? '检测中' : '立即采集'}</button></div>
-      {!configured && <div className="panel"><div className="errorText">请配置 CF_ACCOUNT_ID（或 CLOUDFLARE_ACCOUNT_ID / CF_ZONE_ID）和 CF_API_TOKEN（或 CLOUDFLARE_API_TOKEN）变量后再检测 Workers 用量。</div></div>}
-      <div className="panel"><DataTable rows={rows} columns={['created_at', 'requests', 'errors', 'cpu_time_ms', 'period_start', 'period_end']} /></div>
+      {!configured && <div className="panel"><div className="errorText">{message || '请配置 Cloudflare 账号 ID 和 API Token 变量后再检测 Workers 用量。'}</div></div>}
+      {latest && (
+        <div className="metricGrid workerMetrics">
+          <Metric label="当前已用" value={latest.used_percent || '0%'} />
+          <Metric label="当前剩余" value={latest.remaining_percent || '100%'} />
+          <Metric label="日额度" value={quotaLimit.toLocaleString()} />
+        </div>
+      )}
+      <div className="panel"><DataTable rows={rows} columns={['created_at', 'used_percent', 'remaining_percent', 'period_start', 'period_end']} /></div>
     </section>
   );
 }
@@ -922,6 +952,9 @@ function labelOf(key: string) {
     requests: '请求',
     errors: '错误',
     cpu_time_ms: 'CPU',
+    used_percent: '已用百分比',
+    remaining_percent: '剩余百分比',
+    quota_limit: '日额度',
     period_start: '开始',
     period_end: '结束',
     range: '范围',

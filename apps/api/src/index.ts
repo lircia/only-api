@@ -11,8 +11,16 @@ export interface Env {
   CF_ACCOUNT_ID?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
   CF_ZONE_ID?: string;
+  CLOUDFLARE_ZONE_ID?: string;
+  CF_ACCOUNT_TAG?: string;
+  CLOUDFLARE_ACCOUNT_TAG?: string;
   CF_API_TOKEN?: string;
   CLOUDFLARE_API_TOKEN?: string;
+  CF_TOKEN?: string;
+  CLOUDFLARE_TOKEN?: string;
+  WORKERS_DAILY_REQUEST_LIMIT?: string;
+  CF_WORKERS_DAILY_REQUEST_LIMIT?: string;
+  CLOUDFLARE_WORKERS_DAILY_REQUEST_LIMIT?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
   TELEGRAM_PARSE_MODE?: string;
@@ -72,9 +80,13 @@ const defaultPublicSettings = {
   captchaEnabled: false,
   captchaSiteKey: '',
   apiPublicBaseUrl: '',
-  themeName: 'blue-white',
+  themeName: 'black-white',
+  backgroundImageUrl: '',
   emailDomainValidationEnabled: true,
-  qqEmailNumericPrefixRequired: true
+  qqEmailNumericPrefixRequired: true,
+  healthCheckIntervalMinutes: 60,
+  workerUsageIntervalMinutes: 360,
+  notifyWorkerUsage: true
 };
 
 export default {
@@ -146,9 +158,9 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     return json(await checkSingleChannelHealth(env, channelId));
   }
   if (method === 'POST' && path === '/api/admin/worker-usage-check') {
-    if (!hasWorkerUsageConfig(env)) return json({ error: '请配置 CF_ACCOUNT_ID（或 CLOUDFLARE_ACCOUNT_ID / CF_ZONE_ID）和 CF_API_TOKEN（或 CLOUDFLARE_API_TOKEN）变量' }, 400);
-    await captureWorkerUsage(env);
-    return json({ ok: true, message: '检测成功' });
+    if (!hasWorkerUsageConfig(env)) return json({ error: workerUsageConfigMessage() }, 400);
+    const snapshot = await captureWorkerUsage(env, { forceNotify: true });
+    return json({ ok: true, message: '采集成功，已同步推送（如果已配置 Telegram 或 WxPusher 变量）', snapshot });
   }
   if (method === 'GET' && path === '/api/admin/worker-usage') return listWorkerUsage(env);
   if (method === 'PATCH' && path.startsWith('/api/admin/models/')) return updateModel(request, env, path.split('/').pop() || '');
@@ -173,9 +185,10 @@ async function getBootstrap(env: Env): Promise<Response> {
       registrationEnabled: settings.registrationEnabled ?? true,
       emailVerificationEnabled: isEmailVerificationRequired(settings),
       captchaEnabled: settings.captchaEnabled ?? false,
-      captchaSiteKey: settings.captchaSiteKey ?? '',
+      captchaSiteKey: '',
       apiPublicBaseUrl: env.API_PUBLIC_BASE_URL ?? '',
       themeName: settings.themeName ?? defaultPublicSettings.themeName,
+      backgroundImageUrl: settings.backgroundImageUrl ?? '',
       emailDomainValidationEnabled: settings.emailDomainValidationEnabled ?? true,
       qqEmailNumericPrefixRequired: settings.qqEmailNumericPrefixRequired ?? true
     }
@@ -203,10 +216,12 @@ async function setupSuperAdmin(request: Request, env: Env): Promise<Response> {
     emailVerificationEnabled: body.appMode === 'multi',
     captchaEnabled: false,
     healthCheckIntervalMinutes: 60,
-    workerUsageIntervalMinutes: 60,
-    themeName: 'blue-white',
+    workerUsageIntervalMinutes: 360,
+    themeName: 'black-white',
+    backgroundImageUrl: '',
     emailDomainValidationEnabled: true,
-    qqEmailNumericPrefixRequired: true
+    qqEmailNumericPrefixRequired: true,
+    notifyWorkerUsage: true
   };
   await saveSettings(env, settings);
   const session = await createSession(env, userId);
@@ -525,8 +540,8 @@ async function updateAdminSettings(request: Request, env: Env): Promise<Response
     'registrationEnabled',
     'emailVerificationEnabled',
     'captchaEnabled',
-    'captchaSiteKey',
     'themeName',
+    'backgroundImageUrl',
     'emailDomainValidationEnabled',
     'qqEmailNumericPrefixRequired',
     'healthCheckIntervalMinutes',
@@ -604,7 +619,13 @@ async function updateChannelModels(request: Request, env: Env, channelId: string
 
 async function listWorkerUsage(env: Env): Promise<Response> {
   const rows = await env.DB.prepare('SELECT * FROM worker_usage_snapshots ORDER BY created_at DESC LIMIT 48').all<any>();
-  return json({ configured: hasWorkerUsageConfig(env), snapshots: rows.results || [] });
+  const limit = getWorkerDailyRequestLimit(env);
+  return json({
+    configured: hasWorkerUsageConfig(env),
+    message: hasWorkerUsageConfig(env) ? '' : workerUsageConfigMessage(),
+    quotaLimit: limit,
+    snapshots: (rows.results || []).map((row: any) => toWorkerUsageView(row, limit))
+  });
 }
 
 async function handleGateway(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -765,7 +786,7 @@ async function runScheduledJobs(env: Env): Promise<void> {
   if (shouldRun(settings.lastHealthCheckAt, Number(settings.healthCheckIntervalMinutes || 60))) {
     jobs.push(checkChannelHealth(env));
   }
-  if (shouldRun(settings.lastWorkerUsageCheckAt, Number(settings.workerUsageIntervalMinutes || 60))) {
+  if (shouldRun(settings.lastWorkerUsageCheckAt, Number(settings.workerUsageIntervalMinutes || 360))) {
     jobs.push(captureWorkerUsage(env));
   }
   await Promise.allSettled(jobs);
@@ -889,15 +910,32 @@ async function listGatewayModels(env: Env): Promise<Response> {
   });
 }
 
-async function captureWorkerUsage(env: Env): Promise<void> {
-  if (!hasWorkerUsageConfig(env)) return;
+type WorkerUsageSnapshot = {
+  requests: number;
+  errors: number;
+  cpu_time_ms: number;
+  period_start: string;
+  period_end: string;
+};
+
+type WorkerUsageView = WorkerUsageSnapshot & {
+  id?: string;
+  created_at?: string;
+  used_percent: string;
+  remaining_percent: string;
+  quota_limit: number;
+};
+
+async function captureWorkerUsage(env: Env, options: { forceNotify?: boolean } = {}): Promise<WorkerUsageView | null> {
+  if (!hasWorkerUsageConfig(env)) return null;
   let snapshot = { requests: 0, errors: 0, cpu_time_ms: 0, period_start: '', period_end: '' };
   const accountId = getCloudflareAccountId(env);
   const apiToken = getCloudflareApiToken(env);
+  const quotaLimit = getWorkerDailyRequestLimit(env);
   if (accountId && apiToken) {
     try {
       const end = new Date();
-      const start = new Date(end.getTime() - 60 * 60 * 1000);
+      const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
       const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
         method: 'POST',
         headers: {
@@ -922,6 +960,7 @@ async function captureWorkerUsage(env: Env): Promise<void> {
         })
       });
       const data = await res.json<any>();
+      if (!res.ok || data?.errors?.length) throw new Error(data?.errors?.[0]?.message || `HTTP ${res.status}`);
       const rows = data?.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive || [];
       snapshot = rows.reduce((acc: typeof snapshot, row: any) => ({
         requests: acc.requests + Number(row.sum?.requests || 0),
@@ -941,9 +980,11 @@ async function captureWorkerUsage(env: Env): Promise<void> {
   await saveSettings(env, { lastWorkerUsageCheckAt: new Date().toISOString() });
 
   const settings = await getSettings(env);
-  if (settings.notifyWorkerUsage === true) {
-    await sendUsageNotifications(env, `Workers 用量：请求 ${snapshot.requests}，错误 ${snapshot.errors}，CPU ${Math.round(snapshot.cpu_time_ms)}ms`);
+  const view = toWorkerUsageView(snapshot, quotaLimit);
+  if (options.forceNotify || settings.notifyWorkerUsage !== false) {
+    await sendUsageNotifications(env, formatWorkerUsageNotification(view));
   }
+  return view;
 }
 
 function hasWorkerUsageConfig(env: Env): boolean {
@@ -951,11 +992,57 @@ function hasWorkerUsageConfig(env: Env): boolean {
 }
 
 function getCloudflareAccountId(env: Env): string {
-  return (env.CF_ACCOUNT_ID || env.CLOUDFLARE_ACCOUNT_ID || env.CF_ZONE_ID || '').trim();
+  return (
+    env.CF_ACCOUNT_ID ||
+    env.CLOUDFLARE_ACCOUNT_ID ||
+    env.CF_ACCOUNT_TAG ||
+    env.CLOUDFLARE_ACCOUNT_TAG ||
+    env.CF_ZONE_ID ||
+    env.CLOUDFLARE_ZONE_ID ||
+    ''
+  ).trim();
 }
 
 function getCloudflareApiToken(env: Env): string {
-  return (env.CF_API_TOKEN || env.CLOUDFLARE_API_TOKEN || '').trim();
+  return (env.CF_API_TOKEN || env.CLOUDFLARE_API_TOKEN || env.CF_TOKEN || env.CLOUDFLARE_TOKEN || '').trim();
+}
+
+function getWorkerDailyRequestLimit(env: Env): number {
+  const raw = env.WORKERS_DAILY_REQUEST_LIMIT || env.CF_WORKERS_DAILY_REQUEST_LIMIT || env.CLOUDFLARE_WORKERS_DAILY_REQUEST_LIMIT || '';
+  const parsed = Number(String(raw).replace(/,/g, '').trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 100000;
+}
+
+function toWorkerUsageView(row: any, quotaLimit: number): WorkerUsageView {
+  const requests = Number(row.requests || 0);
+  const used = quotaLimit > 0 ? Math.min(100, Math.max(0, (requests / quotaLimit) * 100)) : 0;
+  const remaining = Math.max(0, 100 - used);
+  return {
+    ...row,
+    requests,
+    errors: Number(row.errors || 0),
+    cpu_time_ms: Number(row.cpu_time_ms || 0),
+    period_start: row.period_start || '',
+    period_end: row.period_end || '',
+    used_percent: formatPercent(used),
+    remaining_percent: formatPercent(remaining),
+    quota_limit: quotaLimit
+  };
+}
+
+function formatPercent(value: number): string {
+  return `${value.toFixed(value >= 10 ? 1 : 2)}%`;
+}
+
+function formatWorkerUsageNotification(snapshot: WorkerUsageView): string {
+  const period = snapshot.period_start && snapshot.period_end
+    ? `\n统计窗口：${snapshot.period_start} - ${snapshot.period_end}`
+    : '';
+  return `Workers 用量：已用 ${snapshot.used_percent}，剩余 ${snapshot.remaining_percent}${period}`;
+}
+
+function workerUsageConfigMessage(): string {
+  return '请配置 Cloudflare 账号 ID 和 API Token 变量。账号 ID 可用 CF_ACCOUNT_ID / CLOUDFLARE_ACCOUNT_ID / CF_ACCOUNT_TAG / CLOUDFLARE_ACCOUNT_TAG，Token 可用 CF_API_TOKEN / CLOUDFLARE_API_TOKEN。';
 }
 
 async function sendUsageNotifications(env: Env, message: string): Promise<void> {

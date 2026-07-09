@@ -1,39 +1,47 @@
 :root {
   color-scheme: light;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --page: #f5f8ff;
-  --surface: #ffffff;
-  --text: #172033;
-  --muted: #64748b;
-  --muted-strong: #42526a;
-  --sidebar: #102a43;
-  --sidebar-text: #f4f8ff;
-  --sidebar-muted: #b8c7dd;
-  --accent: #93c5fd;
-  --primary: #2563eb;
-  --primary-text: #ffffff;
-  --soft: #eaf2ff;
-  --field: #f8fbff;
-  --border: #dbe5f5;
-  --border-soft: #e7edf7;
-  --danger: #dc2626;
-  --success: #15803d;
-  --notice-bg: #fff7d6;
-  --notice-border: #e3d099;
-  --notice-text: #705c11;
-  background: var(--page);
-  color: var(--text);
-}
-
-:root[data-theme="black-white"] {
   --page: #f5f5f5;
+  --main-bg: #f5f5f5;
   --surface: #ffffff;
   --text: #111111;
   --muted: #666666;
   --muted-strong: #333333;
   --sidebar: #111111;
+  --sidebar-bg: #111111;
   --sidebar-text: #ffffff;
   --sidebar-muted: #c7c7c7;
+  --sidebar-active: rgba(255, 255, 255, 0.1);
+  --accent: #ffffff;
+  --primary: #111111;
+  --primary-text: #ffffff;
+  --soft: #eeeeee;
+  --field: #fafafa;
+  --border: #d7d7d7;
+  --border-soft: #e8e8e8;
+  --danger: #dc2626;
+  --success: #15803d;
+  --notice-bg: #fff7d6;
+  --notice-border: #e3d099;
+  --notice-text: #705c11;
+  --app-bg-image: none;
+  --bg-image-opacity: 0.18;
+  background: var(--main-bg);
+  color: var(--text);
+}
+
+:root[data-theme="black-white"] {
+  --page: #f5f5f5;
+  --main-bg: #f5f5f5;
+  --surface: #ffffff;
+  --text: #111111;
+  --muted: #666666;
+  --muted-strong: #333333;
+  --sidebar: #111111;
+  --sidebar-bg: #111111;
+  --sidebar-text: #ffffff;
+  --sidebar-muted: #c7c7c7;
+  --sidebar-active: rgba(255, 255, 255, 0.1);
   --accent: #ffffff;
   --primary: #111111;
   --soft: #eeeeee;
@@ -42,56 +50,85 @@
   --border-soft: #e8e8e8;
 }
 
+:root[data-theme="blue-white"] {
+  --page: #f2fbff;
+  --main-bg: linear-gradient(180deg, #ffffff 0%, #e0f7ff 100%);
+  --surface: #ffffff;
+  --text: #12313f;
+  --muted: #5b7280;
+  --muted-strong: #31505d;
+  --sidebar: #d9f7ff;
+  --sidebar-bg: linear-gradient(180deg, #effcff 0%, #bff0ff 100%);
+  --sidebar-text: #0f3b4a;
+  --sidebar-muted: #4d7b8b;
+  --sidebar-active: rgba(8, 145, 178, 0.13);
+  --accent: #7dd3fc;
+  --primary: #0891b2;
+  --soft: #e8f9ff;
+  --field: #f8fdff;
+  --border: #bfebf7;
+  --border-soft: #d9f3fb;
+}
+
 :root[data-theme="yellow-purple"] {
-  --page: #fff8d7;
+  --page: #fff7a8;
+  --main-bg: linear-gradient(180deg, #fff200 0%, #ffe66d 42%, #b794f6 100%);
   --surface: #ffffff;
   --text: #29124a;
   --muted: #6d5a87;
   --muted-strong: #4b356f;
-  --sidebar: #34135d;
-  --sidebar-text: #fff7c2;
-  --sidebar-muted: #d8c7ff;
-  --accent: #facc15;
+  --sidebar: #7c3aed;
+  --sidebar-bg: linear-gradient(180deg, #7c3aed 0%, #b78320 52%, #fff200 100%);
+  --sidebar-text: #fffef0;
+  --sidebar-muted: #fff7a8;
+  --sidebar-active: rgba(255, 255, 255, 0.18);
+  --accent: #fff200;
   --primary: #6d28d9;
-  --soft: #f5e9ff;
+  --soft: #fff6b0;
   --field: #fffdf1;
-  --border: #e8d88d;
-  --border-soft: #f0e2a7;
+  --border: #dfc731;
+  --border-soft: #eadb74;
 }
 
 :root[data-theme="green-red"] {
-  --page: #f2fbf4;
+  --page: #ecfdf3;
+  --main-bg: #f3fff7;
   --surface: #ffffff;
   --text: #13331f;
   --muted: #5b7462;
   --muted-strong: #375640;
-  --sidebar: #123d25;
+  --sidebar: #8b0000;
+  --sidebar-bg: linear-gradient(180deg, #b00020 0%, #8b0000 100%);
   --sidebar-text: #f4fff7;
-  --sidebar-muted: #b7d7c0;
-  --accent: #fca5a5;
-  --primary: #16a34a;
-  --soft: #e8f7ec;
+  --sidebar-muted: #ffd7d7;
+  --sidebar-active: rgba(255, 255, 255, 0.14);
+  --accent: #bbf7d0;
+  --primary: #b00020;
+  --soft: #defce8;
   --field: #fbfffc;
   --border: #cfe6d4;
   --border-soft: #e0efe3;
-  --danger: #dc2626;
+  --danger: #b00020;
 }
 
 :root[data-theme="pink-orange"] {
-  --page: #fff3f7;
+  --page: #fff1f5;
+  --main-bg: linear-gradient(180deg, #ffe4ec 0%, #fff7fb 100%);
   --surface: #ffffff;
   --text: #3d1630;
   --muted: #7a5a68;
   --muted-strong: #614154;
-  --sidebar: #4a1738;
+  --sidebar: #f97316;
+  --sidebar-bg: linear-gradient(180deg, #fb923c 0%, #ea580c 100%);
   --sidebar-text: #fff5f8;
-  --sidebar-muted: #ffd0df;
-  --accent: #fb923c;
-  --primary: #ec4899;
-  --soft: #ffe6ef;
+  --sidebar-muted: #fff1e7;
+  --sidebar-active: rgba(255, 255, 255, 0.14);
+  --accent: #f9a8d4;
+  --primary: #f97316;
+  --soft: #ffe4ec;
   --field: #fff9fb;
-  --border: #f4cbd9;
-  --border-soft: #f8dce6;
+  --border: #ffc4d7;
+  --border-soft: #ffd7e5;
 }
 
 * {
@@ -101,6 +138,29 @@
 body {
   margin: 0;
   min-width: 320px;
+  background: var(--main-bg);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: var(--app-bg-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: var(--bg-image-opacity);
+}
+
+:root[data-has-bg-image="false"] body::before {
+  opacity: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
 }
 
 button,
@@ -121,10 +181,11 @@ button:disabled {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
+  background: var(--main-bg);
 }
 
 .sidebar {
-  background: var(--sidebar);
+  background: var(--sidebar-bg);
   color: var(--sidebar-text);
   padding: 22px 16px;
   display: flex;
@@ -202,7 +263,7 @@ nav button svg,
 nav button.active,
 nav button:hover,
 .ghostBtn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--sidebar-active);
 }
 
 .logout {
@@ -212,6 +273,7 @@ nav button:hover,
 main {
   min-width: 0;
   padding: 26px;
+  background: var(--main-bg);
 }
 
 .topbar,
@@ -257,6 +319,10 @@ h2 {
   gap: 12px;
 }
 
+.workerMetrics {
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+}
+
 .metric,
 .panel,
 .copyBox {
@@ -281,6 +347,16 @@ h2 {
   font-size: 24px;
 }
 
+:root[data-theme="yellow-purple"] .metricGrid .metric:nth-child(4n + 1) strong,
+:root[data-theme="yellow-purple"] .metricGrid .metric:nth-child(4n + 4) strong {
+  color: #b88700;
+}
+
+:root[data-theme="yellow-purple"] .metricGrid .metric:nth-child(4n + 2) strong,
+:root[data-theme="yellow-purple"] .metricGrid .metric:nth-child(4n + 3) strong {
+  color: #6d28d9;
+}
+
 .panel {
   padding: 18px;
 }
@@ -291,8 +367,8 @@ h2 {
   place-items: center;
   padding: 28px;
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 22%, transparent), color-mix(in srgb, var(--primary) 12%, transparent)),
-    var(--page);
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--primary) 10%, transparent)),
+    var(--main-bg);
 }
 
 .authShell section {
@@ -462,11 +538,12 @@ h2 {
 .themePicker i {
   width: 28px;
   height: 18px;
-  border-radius: 999px;
+  border-radius: 6px;
   overflow: hidden;
   border: 1px solid var(--border);
   display: inline-grid;
   grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
 }
 
 .themePicker b {

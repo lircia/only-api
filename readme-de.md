@@ -1,163 +1,243 @@
 # Only API
 
-Only API ist ein OpenAI-kompatibles API-Gateway für Cloudflare Workers und Pages. Es enthält Anmeldung, Registrierung, E-Mail-Verifizierung, API Keys, Kanalverwaltung, Modellplatz, Nutzungsstatistiken, Workers-Nutzungsprüfung sowie optionale Telegram- und WxPusher-Benachrichtigungen.
+Only API ist ein OpenAI-kompatibles API-Gateway für Cloudflare Workers + Pages. Es enthält ein Worker-Backend, ein Pages-Frontend, D1-Speicher, Benutzeranmeldung, Registrierung, API-Key-Ausgabe, Kanalverwaltung, einen Modellplatz, Nutzungsstatistiken, Workers-Nutzungsüberwachung und optionale Telegram- oder WxPusher-Benachrichtigungen.
 
-Die englische Standarddokumentation befindet sich in [README.md](README.md). Weitere Sprachen: [Chinesisch](readme-zh.md) | [Japanisch](readme-ja.md) | [Russisch](readme-ru.md) | [Arabisch](readme-ar.md) | [Griechisch](readme-el.md)
+Wolltest du schon einmal die API eines Anbieters oder einer Plattform nutzen, aber der API-Endpunkt hatte lokal hohe Latenz oder war teilweise gar nicht erreichbar? Dieses Projekt kann einen Teil dieses Problems lösen, indem API-Anfragen über Cloudflare weitergeleitet werden.
 
-## Projektstruktur
+Wir stellen keine API Keys und keine Upstream-API-Endpunkte bereit. Diese Plattform dient nur zur API-Weiterleitung.
+
+Du kannst einen Cloudflare-Domain-Optimierungsdienst oder Preferred-IP-Dienst verwenden, um die Geschwindigkeit zu verbessern. Das Frontend ruft keine Upstream-Anbieter direkt auf, daher muss die Frontend-Domain normalerweise nicht optimiert werden. Links zu solchen Optimierungen kannst du über eine Websuche finden.
+
+Dieses Repository ist für GitHub-Hosting und Deployment über das Cloudflare-Dashboard gedacht. Es verwendet keine `wrangler.toml`.
+
+## Sprachen
+
+- [English](README.md)
+- [中文](readme-zh.md)
+- [日本語](readme-ja.md)
+- [Русский](readme-ru.md)
+- [العربية](readme-ar.md)
+- [Ελληνικά](readme-el.md)
+
+## Projektpfade
 
 | Zweck | Pfad |
 | --- | --- |
 | Pages-Frontend | `apps/web` |
 | Worker-Backend | `apps/api/src/index.ts` |
 | D1-Schema-SQL | `apps/api/migrations/0001_initial.sql` |
-| Abhängigkeiten und Skripte | `package.json` |
+| Abhängigkeiten | `package.json` |
 
-## Funktionen
+## Hauptfunktionen
 
-- Die Ersteinrichtung erstellt mit `ADMIN_SETUP_SECRET` einen Superadministrator.
-- Im Eigenmodus ist E-Mail-Verifizierung standardmäßig deaktiviert. Im Mehrbenutzermodus ist sie standardmäßig aktiviert.
-- Neue API Keys verwenden `oi-only-`. Früher erstellte Keys bleiben gültig.
-- `/v1/models` gibt die im Modellplatz aktivierten Modellnamen zurück.
-- Im Modellplatz können Anzeigenamen bearbeitet, kopiert und ausgeblendet werden.
-- Die Registrierung mit E-Mail-Verifizierung nutzt einen 13-stelligen Zahlencode, der 13 Minuten gültig ist, 3 Eingabeversuche erlaubt und nach 67 Sekunden erneut gesendet werden kann.
-- E-Mail-Domainprüfung und numerischer QQ-Mail-Präfix sind in den Systemeinstellungen umschaltbar und standardmäßig aktiviert.
-- Jeder Kanal hat eine eigene Testschaltfläche. Beim Test werden Modelle über `/models` synchronisiert.
-- Die Nutzungsstatistik zeigt 3 Stunden, 1 Tag, 7 Tage, 15 Tage und Gesamtwerte.
-- In den Systemeinstellungen können Telegram- und WxPusher-Testnachrichten gesendet werden.
+- Erste Super-Admin-Einrichtung mit `ADMIN_SETUP_SECRET`.
+- Selbstnutzungsmodus und Mehrbenutzermodus.
+- Registrierungsschalter, E-Mail-Code-Verifizierung, Passwortbestätigung, E-Mail-Domain-Prüfung und numerische QQ-Mail-Präfixprüfung.
+- Optionales Cloudflare Turnstile. Der Frontend Site Key gehört in eine Pages-Variable, der Backend Secret Key in eine Worker-Variable.
+- Benutzer-API-Keys verwenden das Präfix `oi-only-`.
+- OpenAI-kompatible Weiterleitung für `/v1/*`.
+- Keine Benutzerkontingente.
+- Kanaltests und Modellsynchronisierung über Upstream `/models`.
+- Modellplatz mit einem Modell pro Zeile, editierbaren Anzeigenamen und ausblendbaren Modellen.
+- Nutzungsstatistiken für 3 Stunden, 1 Tag, 7 Tage, 15 Tage und Gesamtansicht.
+- Workers-Nutzung zeigt verwendeten Prozentsatz und verbleibenden Prozentsatz.
+- Workers-Nutzung wird standardmäßig alle 6 Stunden abgefragt und kann an Telegram oder WxPusher gesendet werden.
+- Zeitangaben im Frontend werden auf UTC+8 angepasst.
+- Eingebaute Themes: Schwarz-Weiß, helles Blau-Weiß, Gelb-Lila, Grün-Rot und Pink-Orange.
+- Optionales Frontend-Hintergrundbild per URL.
 
-## Bereitstellung 1: Worker-Backend
+## Deployment 1: Worker bereitstellen
 
-Erstelle in Cloudflare Workers & Pages einen Worker und verbinde dieses GitHub-Repository.
+Erstelle oder öffne in Cloudflare Workers & Pages ein Worker-Projekt und verbinde dieses GitHub-Repository.
+
+Worker-Build-Einstellungen:
 
 | Einstellung | Wert |
 | --- | --- |
-| Stammverzeichnis | leer lassen oder `/` |
-| Build-Befehl | `npm ci` |
-| Bereitstellungsbefehl | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
+| Root directory | leer oder `/` |
+| Build command | `npm ci` |
+| Deploy command | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
 
-Dieses Projekt benötigt keine `wrangler.toml`.
+`--keep-vars` hilft, Variablen und Secrets aus dem Cloudflare-Dashboard zu behalten. Wenn Variablen oder die D1-Bindung nach einem Update verschwinden, prüfe, ob du denselben Worker neu bereitstellst und nicht einen neuen Worker erstellst. Prüfe danach die Worker-Bindings erneut.
 
-## Bereitstellung 2: D1-Datenbank
+## Deployment 2: D1-Datenbank erstellen
 
-Erstelle eine D1-Datenbank. Empfohlener Name für neue Installationen:
+Erstelle im Cloudflare-Dashboard eine D1-Datenbank.
+
+Empfohlener Datenbankname:
 
 ```txt
 only_api
 ```
 
-Ein anderer D1-Datenbankname ist ebenfalls möglich. Wichtig ist nur der Worker-Bindungsname:
+Der Worker-Bindungsname muss lauten:
 
 ```txt
 DB
 ```
 
-Führe in der D1-Konsole den gesamten Inhalt dieser SQL-Datei aus:
+Öffne die D1-Konsole und führe die gesamte SQL-Datei aus:
 
 ```txt
 apps/api/migrations/0001_initial.sql
 ```
 
-Erstellte Tabellen:
+Diese Tabellen werden erstellt:
 
 | Tabelle | Zweck |
 | --- | --- |
-| `users` | Benutzer und Administratoren |
-| `email_verifications` | E-Mail-Verifizierungstoken |
+| `users` | Benutzer, Admins und Super-Admins |
+| `email_verifications` | 13-stellige E-Mail-Codes |
 | `sessions` | Anmeldesitzungen |
 | `api_keys` | Benutzer-API-Keys |
-| `channels` | Upstream-Kanäle |
-| `model_catalog` | Modellplatz |
-| `usage_logs` | Nutzungsprotokolle |
-| `worker_usage_snapshots` | Workers-Nutzungsschnappschüsse |
+| `channels` | Upstream-API-Kanäle |
+| `model_catalog` | Modelle im Modellplatz |
+| `usage_logs` | Nutzungsdaten der API-Weiterleitung |
+| `worker_usage_snapshots` | Workers-Nutzungssnapshots |
 | `system_settings` | Systemeinstellungen |
 
-## Bereitstellung 3: Worker-Bindings und Variablen
+## Deployment 3: Worker-Ressourcen und Variablen binden
 
-Binde D1 in den Worker-Einstellungen.
+Binde D1 in den Worker-Einstellungen:
 
 | Typ | Name | Wert |
 | --- | --- | --- |
-| D1-Datenbank | `DB` | deine D1-Datenbank |
+| D1 database | `DB` | deine D1-Datenbank |
 
-Pflichtvariablen:
+Erforderliche Worker-Variablen:
 
-| Name | Typ | Hinweis |
+| Name | Typ | Zweck |
 | --- | --- | --- |
 | `APP_ORIGIN` | Variable | URL des Pages-Frontends |
-| `ADMIN_SETUP_SECRET` | Secret | Admin-Schlüssel für die Ersteinrichtung |
-| `JWT_SECRET` | Secret | lange zufällige Zeichenfolge |
+| `ADMIN_SETUP_SECRET` | Secret | Passwort für die erste Super-Admin-Einrichtung |
+| `JWT_SECRET` | Secret | lange zufällige Zeichenfolge für Sitzungen |
 
-Empfohlene Variable:
+Empfohlene Worker-Variable:
 
-| Name | Typ | Hinweis |
+| Name | Typ | Zweck |
 | --- | --- | --- |
 | `API_PUBLIC_BASE_URL` | Variable | öffentliche Worker-URL, die im Frontend angezeigt wird |
 
-Optionale Variablen:
+Optionale E-Mail-Variablen:
 
-| Name | Typ | Hinweis |
+| Name | Typ | Zweck |
 | --- | --- | --- |
 | `RESEND_API_KEY` | Secret | Resend API Key |
-| `RESEND_FROM` | Variable | Absenderadresse für E-Mails |
-| `TURNSTILE_SECRET_KEY` | Secret | Turnstile Secret Key |
-| `CF_ACCOUNT_ID` | Variable | Cloudflare-Konto-ID |
-| `CF_API_TOKEN` | Secret | Token zum Lesen der Workers-Nutzung |
+| `RESEND_FROM` | Variable | Absender, zum Beispiel `Only API <noreply@example.com>` |
 
-Notwendige Variablen für Benachrichtigungen:
+Optionale Turnstile-Worker-Variable:
 
-| Name | Typ | Hinweis |
+| Name | Typ | Zweck |
+| --- | --- | --- |
+| `TURNSTILE_SECRET_KEY` | Secret | Cloudflare Turnstile Secret Key |
+
+Optionale Workers-Nutzungsvariablen:
+
+| Name | Typ | Zweck |
+| --- | --- | --- |
+| `CF_ACCOUNT_ID` | Variable | Cloudflare Account ID |
+| `CF_API_TOKEN` | Secret | API Token mit Leserechten für Workers-Nutzung |
+| `WORKERS_DAILY_REQUEST_LIMIT` | Variable | Tageslimit für die Prozentberechnung, Standard `100000` |
+
+Akzeptierte Aliasnamen sind `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CF_ZONE_ID`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN` und `CLOUDFLARE_TOKEN`.
+
+Telegram-Benachrichtigungsvariablen:
+
+| Name | Typ | Zweck |
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Secret | Telegram Bot Token |
-| `TELEGRAM_CHAT_ID` | Variable | Telegram Chat- oder Gruppen-ID |
+| `TELEGRAM_CHAT_ID` | Variable | Telegram-Chat-, Gruppen- oder Kanal-ID |
+
+WxPusher-Benachrichtigungsvariablen:
+
+| Name | Typ | Zweck |
+| --- | --- | --- |
 | `WXPUSHER_APP_TOKEN` | Secret | WxPusher AppToken |
-| `WXPUSHER_UIDS` | Variable | WxPusher UIDs; erforderlich, wenn `WXPUSHER_TOPIC_IDS` nicht gesetzt ist |
-| `WXPUSHER_TOPIC_IDS` | Variable | WxPusher Topic IDs; erforderlich, wenn `WXPUSHER_UIDS` nicht gesetzt ist |
+| `WXPUSHER_UIDS` | Variable | kommagetrennte UID-Liste, erforderlich ohne Topic IDs |
+| `WXPUSHER_TOPIC_IDS` | Variable | kommagetrennte Topic-ID-Liste, erforderlich ohne UIDs |
 
-## Bereitstellung 4: Pages-Frontend
+Optionaler Zeitplan:
 
-Erstelle ein Cloudflare-Pages-Projekt aus demselben GitHub-Repository.
+Du kannst im Cloudflare-Dashboard einen Worker Cron Trigger hinzufügen, zum Beispiel einmal pro Stunde. Die Anwendung führt die Workers-Nutzungsabfrage nur aus, wenn das eingestellte Intervall erreicht ist. Das Standardintervall beträgt 360 Minuten.
+
+## Deployment 4: Pages-Frontend bereitstellen
+
+Verbinde in Cloudflare Pages dasselbe GitHub-Repository.
+
+Pages-Build-Einstellungen:
 
 | Einstellung | Wert |
 | --- | --- |
-| Framework-Vorgabe | `React (Vite)` |
-| Stammverzeichnis | leer lassen oder `/` |
-| Build-Befehl | `npm ci && npm run build:web` |
-| Build-Ausgabeverzeichnis | `apps/web/dist` |
-| Node.js-Version | `20` oder höher |
+| Framework preset | `React (Vite)` |
+| Root directory | leer oder `/` |
+| Build command | `npm ci && npm run build:web` |
+| Build output directory | `apps/web/dist` |
+| Node.js version | `20` oder höher |
 
 Erforderliche Pages-Variable:
 
 ```txt
-VITE_API_BASE_URL=https://your-worker-domain
+VITE_API_BASE_URL=https://your-worker-domain.workers.dev
 ```
 
-Nach der Pages-Bereitstellung setze die Worker-Variable `APP_ORIGIN` auf die Pages-URL.
+Optionale Pages-Variablen:
 
-## Ersteinrichtung und API-Nutzung
+```txt
+VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
+VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
+```
 
-Öffne die Pages-URL und gib `ADMIN_SETUP_SECRET`, E-Mail, Passwort, Seitennamen sowie Eigenmodus oder Mehrbenutzermodus ein.
+Setze nach dem Pages-Deployment die Worker-Variable `APP_ORIGIN` auf die Pages-URL.
 
-## E-Mail-Verifizierung bei Registrierung
+## Erste Einrichtung
 
-Wenn E-Mail-Verifizierung aktiviert ist, wird bei der Registrierung kein Link mehr gesendet. Stattdessen wird ein 13-stelliger Zahlencode per E-Mail verschickt.
+Öffne die Pages-Frontend-URL. Beim ersten Besuch erscheint die Einrichtungsseite.
+
+Du benötigst:
+
+- `ADMIN_SETUP_SECRET`
+- Super-Admin-E-Mail
+- Super-Admin-Passwort
+- Seitenname
+- Selbstnutzungsmodus oder Mehrbenutzermodus
+
+Nach Erstellung des Super-Admins wird die Einrichtungsseite geschlossen, und der Admin-Secret wird im Frontend-Einrichtungsfluss nicht mehr verwendet.
+
+## Registrierungsverifizierung
+
+Wenn E-Mail-Verifizierung aktiviert ist, sendet die Registrierung keinen Link, sondern einen 13-stelligen Zahlencode.
 
 - Der Code ist 13 Minuten gültig.
 - Jeder Code erlaubt 3 Eingabeversuche.
-- Die Code-Seite enthält eine Schaltfläche zum erneuten Senden.
-- Für erneutes Senden gilt eine Abklingzeit von 67 Sekunden.
-- Das Registrierungsformular enthält ein Feld zur Passwortbestätigung.
-- Die E-Mail-Domainprüfung ist standardmäßig aktiviert und unterstützt bekannte Anbieter wie `qq.com`, `163.com`, `gmail.com`, `outlook.com`, `yeah.net`, `hotmail.com` und `126.com`.
-- QQ-Mail-Adressen müssen standardmäßig einen rein numerischen QQ-Präfix verwenden.
-- Administratoren können die Domainprüfung und den numerischen QQ-Präfix in den Systemeinstellungen deaktivieren.
+- Die Wartezeit für erneutes Senden beträgt 67 Sekunden.
+- Im Selbstnutzungsmodus ist E-Mail-Verifizierung standardmäßig aus.
+- Im Mehrbenutzermodus ist E-Mail-Verifizierung standardmäßig an.
+- E-Mail-Domain-Prüfung und numerische QQ-Mail-Präfixprüfung sind standardmäßig aktiviert.
 
-Client-Basis-URL:
+## Workers-Nutzung und Benachrichtigungen
+
+Die Workers-Nutzungsüberwachung benötigt die Cloudflare Account ID und API Token Variablen. Wenn sie fehlen, zeigt das Frontend eine Konfigurationsmeldung.
+
+Die Seite zeigt:
+
+- aktuellen verwendeten Prozentsatz
+- aktuellen verbleibenden Prozentsatz
+- Tageslimit für Anfragen
+- Zeitraum des Snapshots
+
+Der Prozentsatz wird berechnet aus den Worker-Anfragen der letzten 24 Stunden geteilt durch `WORKERS_DAILY_REQUEST_LIMIT`. Der Standardwert ist `100000`.
+
+Automatische Abfragen laufen standardmäßig alle 6 Stunden. Ein Klick auf „jetzt sammeln“ sendet sofort eine Benachrichtigung, wenn Telegram- oder WxPusher-Variablen konfiguriert sind.
+
+## API-Nutzung
+
+Client Base URL:
 
 ```txt
-https://your-worker-domain/v1
+https://your-worker-domain.workers.dev/v1
 ```
 
-Anfragekopf:
+Header:
 
 ```http
 Authorization: Bearer oi-only-...
@@ -167,32 +247,57 @@ Empfohlene SillyTavern-Einstellungen:
 
 ```txt
 API type: OpenAI Compatible / Custom OpenAI-compatible
-API Base URL: https://your-worker-domain/v1
-API Key: vollständiger oi-only-... key
-Model: aus dem Modellplatz kopieren
+API Base URL: https://your-worker-domain.workers.dev/v1
+API Key: vollständiger oi-only-... Key
+Model: Modellnamen aus dem Modellplatz kopieren
 ```
 
-Beispiele für Kanal-Base-URLs:
+## Kanal Base URL
 
-| Anbieter | Base URL |
+Trage im Kanal die Versionswurzel der Upstream-API ein.
+
+| Dienst | Kanal Base URL |
 | --- | --- |
 | OpenAI | `https://api.openai.com/v1` |
 | OpenRouter | `https://openrouter.ai/api/v1` |
+| Andere kompatible Dienste | normalerweise `https://domain/v1` |
 
-## Erweiterte optionale Push-Variablen
+Das Backend normalisiert häufige Endungen wie `/v1`, `/v1/`, `/v1/chat` und `/v1/chat/completions`.
 
-Diese Variablen sind für eine normale Bereitstellung nicht erforderlich. Sie sind für Benutzer gedacht, die Telegram-Themen, Nachrichtenformatierung, Linkvorschauen oder das Verhalten bezahlter WxPusher-Themen kennen.
+## Fehlerbehebung
 
-| Name | Typ | Hinweis |
-| --- | --- | --- |
-| `TELEGRAM_PARSE_MODE` | Variable | `HTML`, `MarkdownV2` oder `Markdown` |
-| `TELEGRAM_MESSAGE_THREAD_ID` | Variable | Telegram-Forum-Thread-ID |
-| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Variable | Telegram Direct-Messages-Topic-ID |
-| `TELEGRAM_DISABLE_NOTIFICATION` | Variable | boolescher Wert, stille Benachrichtigung |
-| `TELEGRAM_PROTECT_CONTENT` | Variable | boolescher Wert, Inhalt vor Weiterleitung oder Speichern schützen |
-| `TELEGRAM_LINK_PREVIEW_DISABLED` | Variable | boolescher Wert, Linkvorschau deaktivieren |
-| `WXPUSHER_URL` | Variable | Link in der Nachricht |
-| `WXPUSHER_CONTENT_TYPE` | Variable | `1` Text, `2` HTML, `3` Markdown; Standardwert `1` |
-| `WXPUSHER_VERIFY_PAY_TYPE` | Variable | `0` keine Prüfung, `1` nur zahlende Benutzer, `2` nicht abonnierte oder abgelaufene Benutzer |
+Wenn das Frontend keine Verbindung zum Backend hat:
 
+1. Prüfe die Pages-Variable `VITE_API_BASE_URL`.
+2. Stelle sicher, dass sie auf die Worker-URL zeigt, nicht auf die Pages-URL.
+3. Stelle Pages nach Änderung der Pages-Variablen erneut bereit.
+4. Prüfe die Worker-Bindung `DB`.
+5. Prüfe die Worker-Variablen `APP_ORIGIN`, `ADMIN_SETUP_SECRET` und `JWT_SECRET`.
+
+Wenn SillyTavern Unauthorized meldet:
+
+1. Nutze den vollständigen Key, nicht nur das sichtbare Präfix.
+2. Nutze OpenAI Compatible oder Custom OpenAI-compatible.
+3. Prüfe, dass vor oder nach dem Key keine Leerzeichen stehen.
+4. Prüfe, ob der gewählte Modellname im Modellplatz existiert.
+
+## Erweiterte optionale Variablen
+
+Diese Variablen sind für normale Deployments nicht erforderlich.
+
+| Name | Zweck |
+| --- | --- |
+| `TELEGRAM_PARSE_MODE` | `HTML`, `MarkdownV2` oder `Markdown` |
+| `TELEGRAM_MESSAGE_THREAD_ID` | Telegram Forum Topic Thread ID |
+| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Telegram Direct Message Topic ID |
+| `TELEGRAM_DISABLE_NOTIFICATION` | stille Telegram-Benachrichtigung |
+| `TELEGRAM_PROTECT_CONTENT` | Telegram-Inhalte vor Weiterleitung oder Speichern schützen |
+| `TELEGRAM_LINK_PREVIEW_DISABLED` | Telegram-Linkvorschau deaktivieren |
+| `WXPUSHER_URL` | Link in der WxPusher-Nachricht |
+| `WXPUSHER_CONTENT_TYPE` | `1` Text, `2` HTML, `3` Markdown |
+| `WXPUSHER_VERIFY_PAY_TYPE` | WxPusher-Filter für zahlende Benutzer |
+| `CF_WORKERS_DAILY_REQUEST_LIMIT` | Alias für das Tageslimit |
+| `CLOUDFLARE_WORKERS_DAILY_REQUEST_LIMIT` | Alias für das Tageslimit |
+
+Haftungsausschluss: Dieses Projekt ist nur ein API-Weiterleitungswerkzeug. Du bist selbst für Upstream-API-Keys, Anbieterbedingungen, Kosten und rechtliche Einhaltung verantwortlich.
 Dieses Repository wird auf unbestimmte Zeit nicht gewartet.
