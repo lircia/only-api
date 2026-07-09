@@ -372,6 +372,11 @@ th {
   gap: 8px;
 }
 
+.rowActions.left {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
 .empty,
 .centerPanel {
   min-height: 160px;
@@ -513,8 +518,8 @@ code {
 }
 
 .modelChips {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 8px;
 }
 
@@ -529,6 +534,44 @@ code {
   font-size: 12px;
   text-align: left;
   overflow-wrap: anywhere;
+}
+
+.modelEditor {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #ece9e1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.modelEditorBody {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.modelEditorBody input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid #d5d2ca;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #1f2933;
+  background: #fbfaf7;
+}
+
+.modelEditorBody span {
+  overflow-wrap: anywhere;
+}
+
+.settingsSection {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
 }
 
 .turnstile {
@@ -586,6 +629,14 @@ code {
   .metricGrid,
   .split {
     grid-template-columns: 1fr;
+  }
+
+  .modelEditor {
+    grid-template-columns: 1fr;
+  }
+
+  .modelEditor .rowActions {
+    justify-content: flex-start;
   }
 
   nav {

@@ -107,7 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 CREATE INDEX IF NOT EXISTS idx_channels_status_priority ON channels(status, priority);
 
 INSERT OR IGNORE INTO system_settings (key, value) VALUES
-  ('siteName', '"API Relay"'),
+  ('siteName', '"Only API"'),
   ('appMode', '"self"'),
   ('registrationEnabled', 'true'),
   ('emailVerificationEnabled', 'false'),

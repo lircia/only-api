@@ -1,348 +1,284 @@
-# API Relay Cloudflare
+# Only API
 
-Cloudflare Workers + Pages API 中转站，支持用户注册登录、邮箱验证、API Key 分发、渠道管理、模型列表、用量统计、管理员配置、渠道健康检测、Workers 用量监测，以及 Telegram / WxPusher 可选推送。
+Only API is a Cloudflare Workers + Pages API gateway for OpenAI-compatible providers. It includes user login, registration, API keys, channel management, model discovery, usage statistics, admin settings, scheduled channel checks, Workers usage checks, and optional Telegram / WxPusher notifications.
 
-这个项目适合直接上传到 GitHub，然后在 Cloudflare 控制台中连接 GitHub 仓库部署。你不需要编辑 `wrangler.toml`，本项目已经不使用 `wrangler.toml`。
+The repository is designed for GitHub hosting and Cloudflare dashboard deployment. You do not need to edit `wrangler.toml`; this project does not use `wrangler.toml`.
 
-## 项目位置
+## Languages
 
-| 用途 | 路径 | 说明 |
+The default README is English. Other README files also include deployment steps:
+
+- [中文](readme-zh.md)
+- [日本語](readme-ja.md)
+- [Deutsch](readme-de.md)
+- [Русский](readme-ru.md)
+- [العربية](readme-ar.md)
+- [Ελληνικά](readme-el.md)
+
+## Project Paths
+
+| Purpose | Path | Notes |
 | --- | --- | --- |
-| 前端 Pages | `apps/web` | 管理后台、登录注册、统计页面 |
-| 后端 Worker | `apps/api/src/index.ts` | API、鉴权、转发、定时任务 |
-| D1 建表 SQL | `apps/api/migrations/0001_initial.sql` | 复制到 Cloudflare D1 控制台执行 |
-| 依赖配置 | `package.json` | 仓库根目录 |
+| Pages frontend | `apps/web` | Admin console, login, registration, usage pages |
+| Worker backend | `apps/api/src/index.ts` | API, auth, forwarding, scheduled jobs |
+| D1 schema SQL | `apps/api/migrations/0001_initial.sql` | Paste into the Cloudflare D1 console |
+| Dependencies | `package.json` | Repository root |
 
-## 功能概览
+## Features
 
-- 首次访问使用 `ADMIN_SETUP_SECRET` 创建超级管理员。
-- 超级管理员创建后，初始化入口自动关闭，管理员密钥失效。
-- 默认自用配置，可切换多人配置。
-- 用户注册、登录、邮箱验证。
-- Resend 邮件验证支持。
-- Cloudflare Turnstile 人机验证默认关闭，可在系统设置中开启。
-- 用户 API Key 创建、展示、撤销。
-- OpenAI-compatible `/v1/*` API 转发。
-- 不做用户限额，不做模型用量限制，只做 Key 鉴权和统计记录。
-- 渠道设置、优先级路由、渠道测试、渠道健康检测。
-- 模型广场单独显示可用模型，渠道测试或定时健康检测会从上游 `/models` 同步模型。
-- Workers 用量监测，默认 1 小时一次，可在系统设置修改。
-- Telegram / WxPusher 推送 Workers 用量，可选启用。
-- D1 存储业务数据，KV 预留为缓存绑定。
+- First visit setup with `ADMIN_SETUP_SECRET`.
+- Super admin setup page disappears after the first super admin is created.
+- Self-use mode and multi-user mode.
+- Registration can be enabled or disabled.
+- Email verification toggle:
+  - Self-use mode defaults to off.
+  - Multi-user mode defaults to on.
+- Optional Cloudflare Turnstile verification.
+- User API key creation and revocation.
+- OpenAI-compatible `/v1/*` forwarding.
+- No user quota enforcement.
+- Channel settings, channel testing, model syncing from `/models`.
+- Separate Model Square for copying, renaming, and hiding visible model names.
+- Usage table for 3 hours, 1 day, 7 days, 15 days, and all-time summary.
+- Workers usage checks with clear variable-missing feedback.
+- Frontend time display is adjusted by UTC+8.
 
-注册验证规则：
+## Deployment Step 1: Deploy Worker
 
-- 自用配置：邮箱验证默认关闭，可以在系统设置里手动开启。
-- 多人配置：邮箱验证默认开启，也可以在系统设置里手动调整。
+In Cloudflare Workers & Pages:
 
-## GitHub 仓库结构
+1. Create a Worker.
+2. Connect your GitHub repository.
+3. Use these build settings.
 
-```txt
-.
-├─ apps
-│  ├─ api
-│  │  ├─ migrations
-│  │  │  └─ 0001_initial.sql
-│  │  ├─ src
-│  │  │  └─ index.ts
-│  │  └─ .dev.vars.example
-│  └─ web
-│     ├─ public
-│     │  └─ _redirects
-│     ├─ src
-│     │  ├─ main.tsx
-│     │  └─ styles.css
-│     ├─ index.html
-│     └─ vite.config.ts
-├─ .env.example
-├─ package.json
-├─ package-lock.json
-├─ README.md
-└─ tsconfig.json
-```
-
-## 第一步：部署后端 Worker
-
-在 Cloudflare 控制台中：
-
-1. 进入 Workers & Pages。
-2. 创建 Worker。
-3. 选择连接 GitHub 仓库。
-4. 选择这个仓库。
-5. 构建设置按下面填写。
-
-| 配置项 | 值 |
+| Setting | Value |
 | --- | --- |
-| Root directory | 留空或 `/` |
+| Root directory | blank or `/` |
 | Build command | `npm ci` |
-| Deploy command | `npx wrangler deploy apps/api/src/index.ts --name api-relay-worker --compatibility-date 2024-12-01 --keep-vars` |
+| Deploy command | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
 
-这个命令只告诉 Cloudflare 部署哪个后端入口文件，不需要 `wrangler.toml`。`--keep-vars` 用来尽量保留你在 Cloudflare 网页里设置的变量和密钥。
+`--keep-vars` helps preserve variables and secrets that you set in the Cloudflare dashboard.
 
-第一次部署后，Worker 还不能正常使用，因为 D1 数据库和变量还没有绑定。继续做下面几步即可。
+After deploying the Worker, continue with D1 and variable binding. If D1 bindings disappear after a redeploy, bind `DB -> your D1 database` again in the Worker settings.
 
-如果以后重新部署 Worker 后发现 D1 绑定又不见了，重新进入 Worker 设置，把 `DB -> api_relay` 绑定回来即可。完全不用配置文件的部署方式下，D1 绑定需要部署后检查一次。
+## Deployment Step 2: Create D1
 
-## 第二步：创建 D1 数据库
+Create a D1 database in the Cloudflare dashboard.
 
-在 Cloudflare 控制台里创建 D1 数据库：
+Recommended name for new deployments:
 
 ```txt
-数据库名称：api_relay
+only_api
 ```
 
-后端代码里需要的 D1 绑定名是：
+If you used a different D1 database name, that is also fine. The code only requires the Worker binding name below:
 
 ```txt
 DB
 ```
 
-创建完成后，进入这个 D1 数据库的控制台，把下面这个文件里的 SQL 全部复制进去执行：
+Open the D1 console and execute all SQL from:
 
 ```txt
 apps/api/migrations/0001_initial.sql
 ```
 
-这一步会创建项目需要的表。
+Tables created:
 
-## D1 会创建的表
-
-| 表名 | 用途 |
+| Table | Purpose |
 | --- | --- |
-| `users` | 用户、管理员、超级管理员账号 |
-| `email_verifications` | 注册邮箱验证令牌 |
-| `sessions` | 登录会话 |
-| `api_keys` | 用户 API Key |
-| `channels` | 上游 API 渠道配置 |
-| `model_catalog` | 可用模型列表 |
-| `usage_logs` | API 转发请求、状态、延迟和 token 使用记录 |
-| `worker_usage_snapshots` | Workers 用量采集快照 |
-| `system_settings` | 系统设置，例如站点名、模式、检测间隔、人机验证开关 |
+| `users` | Users, admins, super admins |
+| `email_verifications` | Email verification tokens |
+| `sessions` | Login sessions |
+| `api_keys` | User API keys |
+| `channels` | Upstream provider channels |
+| `model_catalog` | Synced models |
+| `usage_logs` | Forwarding logs, status, latency, token usage |
+| `worker_usage_snapshots` | Workers usage snapshots |
+| `system_settings` | Site settings |
 
-`system_settings` 会写入这些默认配置：
+## Deployment Step 3: Bind Worker Resources
 
-| 设置项 | 默认值 |
-| --- | --- |
-| `siteName` | `API Relay` |
-| `appMode` | `self` |
-| `registrationEnabled` | `true` |
-| `captchaEnabled` | `false` |
-| `captchaSiteKey` | 空字符串 |
-| `healthCheckIntervalMinutes` | `60` |
-| `workerUsageIntervalMinutes` | `60` |
-| `lastHealthCheckAt` | 空字符串 |
-| `lastWorkerUsageCheckAt` | 空字符串 |
-| `defaultChannelStrategy` | `priority` |
-| `notifyWorkerUsage` | `false` |
+In Worker settings, bind:
 
-## 第三步：给 Worker 绑定 D1、KV、变量
-
-Worker 创建后，进入这个 Worker 的设置页面，找到 Bindings / Variables。
-
-必须绑定：
-
-| 类型 | 变量名 | 选择 |
+| Type | Variable name | Value |
 | --- | --- | --- |
-| D1 database | `DB` | `api_relay` |
+| D1 database | `DB` | your D1 database |
 
-可选绑定：
+Optional:
 
-| 类型 | 变量名 | 用途 |
+| Type | Variable name | Purpose |
 | --- | --- | --- |
-| KV namespace | `CACHE` | 预留缓存 |
+| KV namespace | `CACHE` | reserved cache binding |
 
-必须添加的变量或密钥：
+Required variables or secrets:
 
-| 名称 | 建议类型 | 说明 |
+| Name | Type | Notes |
 | --- | --- | --- |
-| `APP_ORIGIN` | Variable | Pages 前端域名，例如 `https://xxx.pages.dev` |
-| `ADMIN_SETUP_SECRET` | Secret | 首次创建超级管理员用的管理员密钥 |
-| `JWT_SECRET` | Secret | 随机长字符串，用于会话安全 |
+| `APP_ORIGIN` | Variable | Pages frontend URL, for example `https://xxx.pages.dev` |
+| `ADMIN_SETUP_SECRET` | Secret | setup password for the first super admin |
+| `JWT_SECRET` | Secret | long random string for sessions |
 
-推荐添加，但不是后端转发必需：
+Recommended:
 
-| 名称 | 建议类型 | 说明 |
+| Name | Type | Notes |
 | --- | --- | --- |
-| `API_PUBLIC_BASE_URL` | Variable | 前端展示给用户看的中转地址，例如 `https://api-relay-worker.xxx.workers.dev` |
+| `API_PUBLIC_BASE_URL` | Variable | public Worker URL shown in the frontend |
 
-`API_PUBLIC_BASE_URL` 不参与后端转发逻辑。它的作用是让前端 API Key 页面显示正确的 `/v1` 中转地址。不填也能运行，但页面展示的地址可能不准确。
+Optional email verification:
 
-邮件验证可选：
-
-| 名称 | 建议类型 | 说明 |
+| Name | Type | Notes |
 | --- | --- | --- |
-| `RESEND_API_KEY` | Secret | Resend API Key |
-| `RESEND_FROM` | Variable | 发件人，例如 `API Relay <noreply@example.com>` |
+| `RESEND_API_KEY` | Secret | Resend API key |
+| `RESEND_FROM` | Variable | for example `Only API <noreply@example.com>` |
 
-人机验证可选：
+Optional Turnstile:
 
-| 名称 | 建议类型 | 说明 |
+| Name | Type | Notes |
 | --- | --- | --- |
-| `TURNSTILE_SECRET_KEY` | Secret | Cloudflare Turnstile Secret Key |
+| `TURNSTILE_SECRET_KEY` | Secret | Cloudflare Turnstile secret key |
 
-Workers 用量监测可选：
+Optional Workers usage check:
 
-| 名称 | 建议类型 | 说明 |
+| Name | Type | Notes |
 | --- | --- | --- |
-| `CF_ACCOUNT_ID` | Variable | Cloudflare 账户 ID |
-| `CF_API_TOKEN` | Secret | 用于读取 Workers 用量的 Cloudflare API Token |
+| `CF_ACCOUNT_ID` | Variable | Cloudflare account ID |
+| `CF_API_TOKEN` | Secret | token that can read Workers usage |
 
-Telegram 推送可选：
+If these Workers usage variables are missing, the dashboard will show a clear “please configure variables” message.
 
-| 名称 | 建议类型 | 说明 |
+Optional notifications:
+
+| Name | Type | Notes |
 | --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | Secret | Telegram 机器人 Token |
-| `TELEGRAM_CHAT_ID` | Variable | Telegram 群组或用户 Chat ID |
-
-WxPusher 推送可选：
-
-| 名称 | 建议类型 | 说明 |
-| --- | --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Secret | Telegram bot token |
+| `TELEGRAM_CHAT_ID` | Variable | Telegram chat or group ID |
 | `WXPUSHER_APP_TOKEN` | Secret | WxPusher AppToken |
-| `WXPUSHER_UIDS` | Variable | WxPusher 用户 ID，多个用英文逗号分隔 |
+| `WXPUSHER_UIDS` | Variable | comma-separated WxPusher user IDs |
 
-## 第四步：部署前端 Pages
+## Deployment Step 4: Deploy Pages
 
-在 Cloudflare Pages 中：
+In Cloudflare Pages:
 
-1. 创建 Pages 项目。
-2. 连接同一个 GitHub 仓库。
-3. 构建设置按下面填写。
-
-| 配置项 | 值 |
+| Setting | Value |
 | --- | --- |
 | Framework preset | `React (Vite)` |
-| Root directory | 留空或 `/` |
+| Root directory | blank or `/` |
 | Build command | `npm ci && npm run build:web` |
 | Build output directory | `apps/web/dist` |
-| Node.js version | `20` 或更高 |
+| Node.js version | `20` or higher |
 
-Pages 必须添加环境变量：
+Required Pages environment variable:
 
 ```txt
-VITE_API_BASE_URL=https://你的-worker域名.workers.dev
+VITE_API_BASE_URL=https://your-worker-domain.workers.dev
 ```
 
-如果你给 Worker 绑定了自定义域名，也可以填自定义域名：
+If you use a custom Worker domain:
 
 ```txt
 VITE_API_BASE_URL=https://api.example.com
 ```
 
-`VITE_API_BASE_URL` 才是前端真正请求后端 API 的地址。
+After Pages is deployed, set Worker variable `APP_ORIGIN` to your Pages URL.
 
-## 第五步：回填 APP_ORIGIN
+## First Setup
 
-Pages 部署完成后，你会得到一个 Pages 前端域名，例如：
+Open your Pages frontend URL. The first visit shows the setup page.
 
-```txt
-https://xxx.pages.dev
-```
+You need:
 
-回到 Worker 的变量设置里，把 `APP_ORIGIN` 改成这个 Pages 域名。
+- `ADMIN_SETUP_SECRET`
+- super admin email
+- super admin password
+- site name
+- self-use mode or multi-user mode
 
-这样做是为了：
+After setup:
 
-- 允许前端跨域请求 Worker。
-- 邮箱验证链接能跳回前端页面。
+- setup page disappears
+- `ADMIN_SETUP_SECRET` is no longer used by the frontend setup flow
+- later changes happen inside the admin dashboard
 
-## 第六步：首次初始化
+## Channel Base URL
 
-打开 Pages 前端域名。
+Enter the upstream API base URL at the API version level.
 
-第一次访问会显示初始化页面，需要输入：
+Examples:
 
-- 管理员密钥：`ADMIN_SETUP_SECRET`
-- 超级管理员邮箱
-- 超级管理员密码
-- 站点名称
-- 自用配置或多人配置
-
-超级管理员创建成功后：
-
-- 初始化页面不再显示
-- `ADMIN_SETUP_SECRET` 不再用于前端初始化
-- 后续配置通过管理员界面完成
-
-## 页面一直加载中怎么办
-
-如果打开前端后一直显示“加载中”，通常是前端没有连上 Worker 后端。
-
-优先检查：
-
-1. Pages 环境变量是否添加了 `VITE_API_BASE_URL`。
-2. `VITE_API_BASE_URL` 是否填写为 Worker 域名，而不是 Pages 域名。
-3. 修改 Pages 环境变量后，是否重新部署了 Pages。
-4. Worker 是否绑定了 D1：变量名 `DB`，数据库 `api_relay`。
-5. Worker 是否添加了 `ADMIN_SETUP_SECRET` 和 `JWT_SECRET`。
-6. Worker 的 `APP_ORIGIN` 是否填写为 Pages 前端域名。
-
-正确示例：
-
-```txt
-VITE_API_BASE_URL=https://你的-worker域名.workers.dev
-APP_ORIGIN=https://你的-pages域名.pages.dev
-```
-
-## API 中转地址
-
-客户端 Base URL：
-
-```txt
-https://你的-worker域名.workers.dev/v1
-```
-
-请求头：
-
-```http
-Authorization: Bearer sk-relay-...
-```
-
-用户在前端控制台生成自己的 API Key 后即可使用。
-
-## 渠道 Base URL 怎么填
-
-渠道里的 Base URL 要填到 API 版本这一层，通常需要包含 `/v1`。
-
-常见示例：
-
-| 上游 | 渠道 Base URL |
+| Provider | Channel Base URL |
 | --- | --- |
 | OpenAI | `https://api.openai.com/v1` |
 | OpenRouter | `https://openrouter.ai/api/v1` |
-| 其他 OpenAI-compatible 服务 | 一般是 `https://域名/v1` 或服务商文档里的 API Base URL |
+| Other OpenAI-compatible providers | usually `https://domain/v1` |
 
-不要只填：
+The backend normalizes common suffixes:
 
 ```txt
-https://openrouter.ai
+.../v1
+.../v1/
+.../v1/chat
+.../v1/chat/completions
 ```
 
-否则请求会打到网页路由，返回 HTML 404。
+They are normalized to a usable API root before forwarding and model syncing.
 
-保存渠道时系统会自动规整常见后缀：
+## API Usage
 
-| 你填的后缀 | 系统保存为 |
-| --- | --- |
-| `/v1` | `/v1` |
-| `/v1/` | `/v1` |
-| `/v1/chat` | `/v1` |
-| `/v1/chat/completions` | `/v1` |
+Client Base URL:
 
-实际转发时会根据客户端请求灵活追加路径。例如 SillyTavern 请求 `/v1/chat/completions`，上游会转发到渠道 Base URL 后面的 `/chat/completions`，不会固定写死某一个接口。
+```txt
+https://your-worker-domain.workers.dev/v1
+```
 
-## 本地可选命令
+Header:
 
-如果你只想用 Cloudflare 网页部署，可以忽略这一节。
+```http
+Authorization: Bearer oi-only-...
+```
+
+New API keys use the `oi-only-` prefix. Older keys generated before this prefix change remain valid.
+
+SillyTavern recommended settings:
+
+```txt
+API type: OpenAI Compatible / Custom OpenAI-compatible
+API Base URL: https://your-worker-domain.workers.dev/v1
+API Key: your full oi-only-... key
+Model: copy a model name from Model Square
+```
+
+The backend accepts these key formats:
+
+```txt
+Authorization: Bearer oi-only-...
+Authorization: oi-only-...
+x-api-key: oi-only-...
+api-key: oi-only-...
+```
+
+## Troubleshooting
+
+If the frontend keeps loading:
+
+1. Check Pages variable `VITE_API_BASE_URL`.
+2. Make sure it points to the Worker URL, not the Pages URL.
+3. Redeploy Pages after changing environment variables.
+4. Check Worker D1 binding: `DB`.
+5. Check Worker variables: `ADMIN_SETUP_SECRET`, `JWT_SECRET`, `APP_ORIGIN`.
+
+If SillyTavern says Unauthorized:
+
+1. Use the full API key, not the key prefix.
+2. Select OpenAI Compatible / Custom OpenAI-compatible.
+3. Do not use an official OpenRouter preset unless you want to bypass Only API.
+4. Make sure there are no spaces before or after the key.
+
+## Optional Local Commands
 
 ```bash
 npm ci
 npm run typecheck
 npm run build:web
-```
-
-如果你会用命令行，也可以用下面的命令部署后端，但不是必须：
-
-```bash
 npm run deploy:api
 ```

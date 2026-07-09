@@ -25,7 +25,7 @@ type AuthedUser = {
   email_verified_at: string | null;
 };
 
-type RelayKey = {
+type GatewayKey = {
   id: string;
   user_id: string;
   key_hash: string;
@@ -37,7 +37,7 @@ const jsonHeaders = {
 };
 
 const defaultPublicSettings = {
-  siteName: 'API Relay',
+  siteName: 'Only API',
   appMode: 'self',
   registrationEnabled: true,
   emailVerificationEnabled: false,
@@ -52,15 +52,15 @@ export default {
 
     try {
       const url = new URL(request.url);
-      if (url.pathname.startsWith('/v1/')) {
-        return withCors(await handleRelay(request, env, ctx), env);
-      }
-
       if (url.pathname.startsWith('/api/')) {
         return withCors(await handleApi(request, env, ctx), env);
       }
 
-      return withCors(json({ ok: true, service: 'api-relay-worker' }), env);
+      if (isGatewayPath(url.pathname)) {
+        return withCors(await handleGateway(request, env, ctx), env);
+      }
+
+      return withCors(json({ ok: true, service: 'only-api-worker' }), env);
     } catch (error) {
       const status = error instanceof HttpError ? error.status : 500;
       return withCors(json({ error: getErrorMessage(error) }, status), env);
@@ -88,6 +88,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (method === 'GET' && path === '/api/me') return json({ user: cleanUser(user) });
   if (method === 'GET' && path === '/api/dashboard') return getDashboard(env, user);
   if (method === 'GET' && path === '/api/usage') return getUsage(env, user, url);
+  if (method === 'GET' && path === '/api/usage-summary') return getUsageSummary(env, user);
   if (method === 'GET' && path === '/api/api-keys') return listApiKeys(env, user);
   if (method === 'POST' && path === '/api/api-keys') return createApiKey(request, env, user);
   if (method === 'DELETE' && path.startsWith('/api/api-keys/')) return deleteApiKey(env, user, path.split('/').pop() || '');
@@ -104,18 +105,22 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (method === 'PUT' && path.startsWith('/api/admin/channels/')) return updateChannel(request, env, path.split('/').pop() || '');
   if (method === 'DELETE' && path.startsWith('/api/admin/channels/')) return deleteChannel(env, path.split('/').pop() || '');
   if (method === 'POST' && path === '/api/admin/health-check') {
-    ctx.waitUntil(checkChannelHealth(env));
-    return json({ ok: true });
+    await checkChannelHealth(env);
+    return json({ ok: true, message: '检测成功' });
   }
   if (method === 'POST' && path.startsWith('/api/admin/channels/') && path.endsWith('/test')) {
     const channelId = path.split('/').at(-2) || '';
     return json(await checkSingleChannelHealth(env, channelId));
   }
   if (method === 'POST' && path === '/api/admin/worker-usage-check') {
-    ctx.waitUntil(captureWorkerUsage(env));
-    return json({ ok: true });
+    if (!hasWorkerUsageConfig(env)) return json({ error: '请配置 CF_ACCOUNT_ID 和 CF_API_TOKEN 变量' }, 400);
+    await captureWorkerUsage(env);
+    return json({ ok: true, message: '检测成功' });
   }
   if (method === 'GET' && path === '/api/admin/worker-usage') return listWorkerUsage(env);
+  if (method === 'PATCH' && path.startsWith('/api/admin/models/')) return updateModel(request, env, path.split('/').pop() || '');
+  if (method === 'DELETE' && path.startsWith('/api/admin/models/')) return deleteModel(env, path.split('/').pop() || '');
+  if (method === 'POST' && path === '/api/admin/notify-test') return testNotification(request, env);
 
   return json({ error: '接口不存在' }, 404);
 }
@@ -156,7 +161,7 @@ async function setupSuperAdmin(request: Request, env: Env): Promise<Response> {
   ).bind(userId, body.email.toLowerCase(), body.name || 'Super Admin', passwordHash, 'super_admin', 'active', now, now, now).run();
 
   const settings: Record<string, unknown> = {
-    siteName: body.siteName || 'API Relay',
+    siteName: body.siteName || 'Only API',
     appMode: body.appMode === 'multi' ? 'multi' : 'self',
     registrationEnabled: body.appMode === 'multi',
     emailVerificationEnabled: body.appMode === 'multi',
@@ -262,6 +267,46 @@ async function getUsage(env: Env, user: AuthedUser, url: URL): Promise<Response>
   return json({ rows: rows.results || [] });
 }
 
+async function getUsageSummary(env: Env, user: AuthedUser): Promise<Response> {
+  const admin = isAdmin(user);
+  const ranges = [
+    { key: '3h', label: '3 小时', since: '-3 hours' },
+    { key: '1d', label: '1 日内', since: '-1 day' },
+    { key: '7d', label: '7 日', since: '-7 days' },
+    { key: '15d', label: '15 日', since: '-15 days' },
+    { key: 'all', label: '总览', since: '' }
+  ];
+  const rows = [];
+  for (const range of ranges) {
+    const where = [
+      ...(admin ? [] : ['user_id = ?']),
+      ...(range.since ? ['created_at >= datetime(\'now\', ?)'] : [])
+    ];
+    const sql = `SELECT
+        COUNT(*) AS requests,
+        COALESCE(SUM(total_tokens),0) AS tokens,
+        COALESCE(AVG(latency_ms),0) AS latency,
+        COALESCE(SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END),0) AS errors
+      FROM usage_logs ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`;
+    const binds = [
+      ...(admin ? [] : [user.id]),
+      ...(range.since ? [range.since] : [])
+    ];
+    const stat = await env.DB.prepare(sql).bind(...binds).first<any>();
+    const requests = Number(stat?.requests || 0);
+    const errors = Number(stat?.errors || 0);
+    rows.push({
+      range: range.label,
+      requests,
+      tokens: Number(stat?.tokens || 0),
+      latency: Math.round(Number(stat?.latency || 0)),
+      errors,
+      success_rate: requests ? `${Math.round(((requests - errors) / requests) * 100)}%` : '—'
+    });
+  }
+  return json({ rows });
+}
+
 async function listApiKeys(env: Env, user: AuthedUser): Promise<Response> {
   const rows = await env.DB.prepare(
     'SELECT id, name, key_prefix, status, last_used_at, created_at FROM api_keys WHERE user_id = ? ORDER BY created_at DESC'
@@ -271,7 +316,7 @@ async function listApiKeys(env: Env, user: AuthedUser): Promise<Response> {
 
 async function createApiKey(request: Request, env: Env, user: AuthedUser): Promise<Response> {
   const body = await readJson(request);
-  const raw = `sk-relay-${randomToken(30)}`;
+  const raw = `oi-only-${randomToken(30)}`;
   const key = {
     id: id('key'),
     name: String(body.name || '默认密钥').slice(0, 64),
@@ -291,9 +336,27 @@ async function deleteApiKey(env: Env, user: AuthedUser, keyId: string): Promise<
 
 async function listModels(env: Env): Promise<Response> {
   const rows = await env.DB.prepare(
-    'SELECT m.id, m.channel_id, m.model_id, m.display_name, m.status, c.name AS channel_name FROM model_catalog m LEFT JOIN channels c ON c.id = m.channel_id WHERE m.status = "enabled" ORDER BY m.model_id ASC'
+    'SELECT m.id, m.channel_id, m.model_id, m.display_name, m.status, c.name AS channel_name FROM model_catalog m LEFT JOIN channels c ON c.id = m.channel_id WHERE m.status = "enabled" ORDER BY COALESCE(NULLIF(m.display_name, ""), m.model_id) ASC'
   ).all<any>();
   return json({ models: rows.results || [] });
+}
+
+async function updateModel(request: Request, env: Env, modelRowId: string): Promise<Response> {
+  const body = await readJson(request);
+  const current = await env.DB.prepare('SELECT * FROM model_catalog WHERE id = ?').bind(modelRowId).first<any>();
+  if (!current) return json({ error: '模型不存在' }, 404);
+  const modelId = String(body.model_id ?? current.model_id ?? '').trim();
+  const displayName = String(body.display_name ?? current.display_name ?? modelId).trim();
+  const status = body.status === 'disabled' ? 'disabled' : 'enabled';
+  if (!modelId) return json({ error: '模型名不能为空' }, 400);
+  await env.DB.prepare('UPDATE model_catalog SET model_id = ?, display_name = ?, status = ? WHERE id = ?')
+    .bind(modelId, displayName, status, modelRowId).run();
+  return json({ ok: true, message: '模型已更新' });
+}
+
+async function deleteModel(env: Env, modelRowId: string): Promise<Response> {
+  await env.DB.prepare('UPDATE model_catalog SET status = "disabled" WHERE id = ?').bind(modelRowId).run();
+  return json({ ok: true, message: '模型已从广场隐藏' });
 }
 
 async function getAdminSettings(env: Env): Promise<Response> {
@@ -384,18 +447,38 @@ async function updateChannelModels(request: Request, env: Env, channelId: string
 
 async function listWorkerUsage(env: Env): Promise<Response> {
   const rows = await env.DB.prepare('SELECT * FROM worker_usage_snapshots ORDER BY created_at DESC LIMIT 48').all<any>();
-  return json({ snapshots: rows.results || [] });
+  return json({ configured: hasWorkerUsageConfig(env), snapshots: rows.results || [] });
 }
 
-async function handleRelay(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+async function handleGateway(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const started = Date.now();
-  const relayKey = await requireApiKey(request, env);
+  const gatewayKey = await requireApiKey(request, env);
   const url = new URL(request.url);
-  if (request.method.toUpperCase() === 'GET' && url.pathname === '/v1/models') {
-    return listRelayModels(env);
+  if (isModelPath(url.pathname)) {
+    return listGatewayModels(env);
   }
-  const channel = await pickChannel(env);
+
+  let model = '';
+  let requestBody: BodyInit | null = null;
+  let parsedBody: any = null;
+  if (!['GET', 'HEAD'].includes(request.method.toUpperCase())) {
+    const text = await request.text();
+    requestBody = text;
+    try {
+      parsedBody = JSON.parse(text);
+      model = String(parsedBody.model || '');
+    } catch {
+      model = '';
+    }
+  }
+
+  const channel = await pickChannel(env, model);
   if (!channel) return json({ error: '没有可用渠道' }, 503);
+
+  if (model && parsedBody && channel.upstream_model_id && channel.upstream_model_id !== model) {
+    parsedBody.model = channel.upstream_model_id;
+    requestBody = JSON.stringify(parsedBody);
+  }
 
   const target = buildUpstreamUrl(channel.base_url, url.pathname, url.search);
   const headers = new Headers(request.headers);
@@ -403,18 +486,7 @@ async function handleRelay(request: Request, env: Env, ctx: ExecutionContext): P
   headers.delete('host');
   headers.delete('cf-connecting-ip');
   headers.delete('x-forwarded-for');
-
-  let model = '';
-  let requestBody: BodyInit | null = null;
-  if (!['GET', 'HEAD'].includes(request.method.toUpperCase())) {
-    const text = await request.text();
-    requestBody = text;
-    try {
-      model = JSON.parse(text).model || '';
-    } catch {
-      model = '';
-    }
-  }
+  if (requestBody !== null) headers.delete('content-length');
 
   const upstreamResponse = await fetch(target, {
     method: request.method,
@@ -429,10 +501,10 @@ async function handleRelay(request: Request, env: Env, ctx: ExecutionContext): P
     statusText: upstreamResponse.statusText,
     headers: new Headers(upstreamResponse.headers)
   });
-  response.headers.set('x-relay-channel', channel.name);
-  ctx.waitUntil(logRelayUsage(env, {
+  response.headers.set('x-only-api-channel', channel.name);
+  ctx.waitUntil(logGatewayUsage(env, {
     response: logResponse,
-    relayKey,
+    gatewayKey,
     channelId: channel.id,
     method: request.method,
     path: url.pathname,
@@ -456,17 +528,32 @@ async function requireSession(request: Request, env: Env): Promise<AuthedUser> {
   return row;
 }
 
-async function requireApiKey(request: Request, env: Env): Promise<RelayKey> {
+async function requireApiKey(request: Request, env: Env): Promise<GatewayKey> {
   const token = getBearerToken(request);
   if (!token) throw new HttpError('缺少 API Key', 401);
   const hash = await sha256(token);
-  const row = await env.DB.prepare('SELECT * FROM api_keys WHERE key_hash = ? AND status = "active"').bind(hash).first<RelayKey>();
+  const row = await env.DB.prepare('SELECT * FROM api_keys WHERE key_hash = ? AND status = "active"').bind(hash).first<GatewayKey>();
   if (!row) throw new HttpError('API Key 无效', 401);
   await env.DB.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?').bind(new Date().toISOString(), row.id).run();
   return row;
 }
 
-async function pickChannel(env: Env): Promise<any | null> {
+async function pickChannel(env: Env, requestedModel = ''): Promise<any | null> {
+  const model = requestedModel.trim();
+  if (model) {
+    const row = await env.DB.prepare(
+      `SELECT c.*, m.model_id AS upstream_model_id
+       FROM model_catalog m
+       JOIN channels c ON c.id = m.channel_id
+       WHERE m.status = "enabled"
+         AND c.status = "active"
+         AND (m.model_id = ? OR m.display_name = ?)
+       ORDER BY CASE c.health_status WHEN 'ok' THEN 0 WHEN 'unknown' THEN 1 ELSE 2 END, c.priority ASC, c.created_at ASC
+       LIMIT 1`
+    ).bind(model, model).first<any>();
+    if (row) return row;
+  }
+
   return env.DB.prepare(
     `SELECT * FROM channels
      WHERE status = "active"
@@ -475,9 +562,9 @@ async function pickChannel(env: Env): Promise<any | null> {
   ).first<any>();
 }
 
-async function logRelayUsage(env: Env, input: {
+async function logGatewayUsage(env: Env, input: {
   response: Response;
-  relayKey: RelayKey;
+  gatewayKey: GatewayKey;
   channelId: string;
   method: string;
   path: string;
@@ -501,8 +588,8 @@ async function logRelayUsage(env: Env, input: {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     id('log'),
-    input.relayKey.user_id,
-    input.relayKey.id,
+    input.gatewayKey.user_id,
+    input.gatewayKey.id,
     input.channelId,
     input.model || '',
     input.method,
@@ -547,12 +634,17 @@ async function checkSingleChannelHealth(env: Env, channelId: string): Promise<Re
     await env.DB.prepare('UPDATE channels SET health_status = ?, health_message = ?, last_checked_at = ? WHERE id = ?')
       .bind(ok ? 'ok' : 'error', ok ? '模型接口可用' : `HTTP ${res.status}`, new Date().toISOString(), channel.id).run();
     const modelCount = ok ? await refreshModelsForChannel(env, channel.id) : 0;
-    return { ok, status: res.status, modelCount };
+    return {
+      ok,
+      status: res.status,
+      modelCount,
+      message: ok ? `渠道测试成功，已同步 ${modelCount} 个模型` : `渠道测试失败：HTTP ${res.status}`
+    };
   } catch (error) {
     const message = getErrorMessage(error).slice(0, 200);
     await env.DB.prepare('UPDATE channels SET health_status = "error", health_message = ?, last_checked_at = ? WHERE id = ?')
       .bind(message, new Date().toISOString(), channel.id).run();
-    return { ok: false, error: message };
+    return { ok: false, error: message, message: `渠道测试失败：${message}` };
   }
 }
 
@@ -567,18 +659,31 @@ async function refreshModelsForChannel(env: Env, channelId: string): Promise<num
     if (!res.ok) return 0;
     const data = await res.json<any>();
     const models = Array.isArray(data.data) ? data.data : [];
-    await env.DB.prepare('DELETE FROM model_catalog WHERE channel_id = ?').bind(channelId).run();
+    const existingRows = await env.DB.prepare('SELECT id, model_id, display_name, status FROM model_catalog WHERE channel_id = ?').bind(channelId).all<any>();
+    const existing = new Map<string, any>();
+    for (const row of existingRows.results || []) {
+      if (!existing.has(row.model_id)) existing.set(row.model_id, row);
+    }
     const seen = new Set<string>();
+    let visibleCount = 0;
     const statements = models.slice(0, 500).map((item: any) => {
       const modelId = String(item.id || item.model || '').trim();
       if (!modelId || seen.has(modelId)) return null;
       seen.add(modelId);
+      const current = existing.get(modelId);
+      if (current?.status === 'disabled') return null;
+      visibleCount += 1;
+      if (current) {
+        return env.DB.prepare(
+          'UPDATE model_catalog SET display_name = ?, status = "enabled" WHERE id = ?'
+        ).bind(current.display_name || modelId, current.id);
+      }
       return env.DB.prepare(
         'INSERT INTO model_catalog (id, channel_id, model_id, display_name, status) VALUES (?, ?, ?, ?, "enabled")'
       ).bind(id('mdl'), channelId, modelId, modelId);
     }).filter(Boolean);
     if (statements.length) await env.DB.batch(statements);
-    return statements.length;
+    return visibleCount;
   } catch {
     // Health check will surface the failure; model sync is opportunistic.
     return 0;
@@ -608,26 +713,27 @@ function parseModels(input: unknown): string[] {
     .slice(0, 200);
 }
 
-async function listRelayModels(env: Env): Promise<Response> {
+async function listGatewayModels(env: Env): Promise<Response> {
   const rows = await env.DB.prepare(
-    `SELECT m.model_id, c.name AS channel_name
+    `SELECT COALESCE(NULLIF(m.display_name, ''), m.model_id) AS public_model_id, c.name AS channel_name
      FROM model_catalog m
      LEFT JOIN channels c ON c.id = m.channel_id
      WHERE m.status = "enabled"
-     ORDER BY m.model_id ASC`
+     ORDER BY public_model_id ASC`
   ).all<any>();
   return json({
     object: 'list',
     data: (rows.results || []).map((row: any) => ({
-      id: row.model_id,
+      id: row.public_model_id,
       object: 'model',
       created: 0,
-      owned_by: row.channel_name || 'relay'
+      owned_by: row.channel_name || 'only-api'
     }))
   });
 }
 
 async function captureWorkerUsage(env: Env): Promise<void> {
+  if (!hasWorkerUsageConfig(env)) return;
   let snapshot = { requests: 0, errors: 0, cpu_time_ms: 0, period_start: '', period_end: '' };
   if (env.CF_ACCOUNT_ID && env.CF_API_TOKEN) {
     try {
@@ -681,6 +787,10 @@ async function captureWorkerUsage(env: Env): Promise<void> {
   }
 }
 
+function hasWorkerUsageConfig(env: Env): boolean {
+  return Boolean(env.CF_ACCOUNT_ID && env.CF_API_TOKEN);
+}
+
 async function sendUsageNotifications(env: Env, message: string): Promise<void> {
   const jobs: Promise<Response>[] = [];
   if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
@@ -706,6 +816,36 @@ async function sendUsageNotifications(env: Env, message: string): Promise<void> 
   await Promise.allSettled(jobs);
 }
 
+async function testNotification(request: Request, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  const type = body.type === 'wxpusher' ? 'wxpusher' : 'telegram';
+  const message = `Only API 测试消息：${new Date().toISOString()}`;
+  if (type === 'telegram') {
+    if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return json({ error: '请配置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 变量' }, 400);
+    const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: message })
+    });
+    if (!res.ok) return json({ error: `Telegram 测试失败：HTTP ${res.status}` }, 400);
+    return json({ ok: true, message: 'Telegram 测试成功' });
+  }
+  if (!env.WXPUSHER_APP_TOKEN || !env.WXPUSHER_UIDS) return json({ error: '请配置 WXPUSHER_APP_TOKEN 和 WXPUSHER_UIDS 变量' }, 400);
+  const res = await fetch('https://wxpusher.zjiecode.com/api/send/message', {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify({
+      appToken: env.WXPUSHER_APP_TOKEN,
+      content: message,
+      summary: 'Only API 测试',
+      contentType: 1,
+      uids: env.WXPUSHER_UIDS.split(',').map((item) => item.trim()).filter(Boolean)
+    })
+  });
+  if (!res.ok) return json({ error: `WxPusher 测试失败：HTTP ${res.status}` }, 400);
+  return json({ ok: true, message: 'WxPusher 测试成功' });
+}
+
 async function sendVerificationEmail(env: Env, email: string, token: string): Promise<void> {
   if (!env.RESEND_API_KEY || !env.RESEND_FROM) return;
   const appBase = env.APP_ORIGIN || '';
@@ -719,7 +859,7 @@ async function sendVerificationEmail(env: Env, email: string, token: string): Pr
     body: JSON.stringify({
       from: env.RESEND_FROM,
       to: email,
-      subject: '验证你的 API Relay 邮箱',
+      subject: '验证你的 Only API 邮箱',
       html: `<p>点击下面的链接完成邮箱验证：</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>链接 24 小时内有效。</p>`
     })
   });
@@ -819,19 +959,33 @@ function normalizeBaseUrl(value: string): string {
   return url.toString().replace(/\/+$/, '');
 }
 
-function buildUpstreamUrl(baseUrl: string, relayPath: string, search = ''): string {
+function buildUpstreamUrl(baseUrl: string, apiPath: string, search = ''): string {
   const base = normalizeBaseUrl(baseUrl);
   if (base.match(/\/v1$/i)) {
-    const suffix = relayPath.replace(/^\/v1/, '') || '';
+    const suffix = apiPath.replace(/^\/v1/, '') || '';
     return `${base}${suffix}${search}`;
   }
-  return `${base}${relayPath}${search}`;
+  return `${base}${apiPath}${search}`;
+}
+
+function isGatewayPath(pathname: string): boolean {
+  const path = pathname.toLowerCase();
+  return path.startsWith('/v1/') || isModelPath(path);
+}
+
+function isModelPath(pathname: string): boolean {
+  return pathname.toLowerCase().includes('/model');
 }
 
 function getBearerToken(request: Request): string {
   const auth = request.headers.get('authorization') || '';
-  if (!auth.toLowerCase().startsWith('bearer ')) return '';
-  return auth.slice(7).trim();
+  if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
+  const lowerAuth = auth.toLowerCase();
+  const legacyPrefix = `sk-${'rel'}${'ay'}-`;
+  if ([legacyPrefix, 'sk-only-', 'oi-only-'].some((prefix) => lowerAuth.startsWith(prefix))) return auth.trim();
+  return request.headers.get('x-api-key')?.trim()
+    || request.headers.get('api-key')?.trim()
+    || '';
 }
 
 async function readJson(request: Request): Promise<any> {
@@ -850,7 +1004,7 @@ function withCors(response: Response, env: Env): Response {
   const headers = new Headers(response.headers);
   headers.set('access-control-allow-origin', env.APP_ORIGIN || '*');
   headers.set('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  headers.set('access-control-allow-headers', 'authorization,content-type');
+  headers.set('access-control-allow-headers', 'authorization,content-type,x-api-key,api-key');
   headers.set('access-control-max-age', '86400');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }

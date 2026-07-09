@@ -44,10 +44,10 @@ type SettingsShape = {
 
 type NavKey = 'dashboard' | 'keys' | 'usage' | 'models' | 'settings' | 'users' | 'channels' | 'workerUsage';
 
-const tokenStoreKey = 'api-relay-token';
+const tokenStoreKey = 'only-api-token';
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const defaultSettings: SettingsShape = {
-  siteName: 'API Relay',
+  siteName: 'Only API',
   appMode: 'self',
   registrationEnabled: true,
   emailVerificationEnabled: false,
@@ -143,7 +143,7 @@ function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brandMark">AR</div>
+          <div className="brandMark">OA</div>
           <div>
             <strong>{settings.siteName}</strong>
             <span>{settings.appMode === 'multi' ? '多人模式' : '自用模式'}</span>
@@ -169,7 +169,7 @@ function App() {
         {active === 'dashboard' && <Dashboard api={api} />}
         {active === 'keys' && <ApiKeys api={api} publicBase={settings.apiPublicBaseUrl || location.origin} />}
         {active === 'usage' && <Usage api={api} />}
-        {active === 'models' && <Models api={api} />}
+        {active === 'models' && <Models api={api} admin={admin} />}
         {active === 'settings' && admin && <AdminSettings api={api} settings={settings} onSaved={(next) => setSettings({ ...settings, ...next })} />}
         {active === 'users' && admin && <UsersPage api={api} />}
         {active === 'channels' && admin && <Channels api={api} />}
@@ -187,7 +187,7 @@ function BootError({ message }: { message: string }) {
       <div className="checkList">
         <span>检查 Pages 环境变量 `VITE_API_BASE_URL` 是否填写为 Worker 域名。</span>
         <span>修改 Pages 环境变量后，需要重新部署 Pages。</span>
-        <span>检查 Worker 是否已经绑定 D1：变量名 `DB`，数据库 `api_relay`。</span>
+        <span>检查 Worker 是否已经绑定 D1：变量名 `DB`，数据库推荐使用 `only_api`。</span>
         <span>检查 Worker 变量 `APP_ORIGIN` 是否填写为 Pages 域名。</span>
       </div>
       <button className="primaryBtn" onClick={() => location.reload()}><RefreshCw />重新加载</button>
@@ -200,10 +200,10 @@ function Shell({ title, children }: { title: string; children: React.ReactNode }
     <div className="authShell">
       <section>
         <div className="brand large">
-          <div className="brandMark">AR</div>
+          <div className="brandMark">OA</div>
           <div>
             <strong>{title}</strong>
-            <span>Cloudflare Workers and Pages API relay</span>
+            <span>Cloudflare Workers and Pages API gateway</span>
           </div>
         </div>
         {children}
@@ -293,7 +293,17 @@ function Auth({ settings, api, onLogin }: { settings: SettingsShape; api: ApiCli
 
 function Dashboard({ api }: { api: ApiClient }) {
   const [data, setData] = useState<any>(null);
-  useLoad(() => api.get('/api/dashboard').then(setData), []);
+  const [refreshing, setRefreshing] = useState(false);
+  async function load() {
+    setRefreshing(true);
+    try {
+      const next = await api.get('/api/dashboard');
+      setData(next);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+  useLoad(load, []);
   if (!data) return <LoadingPanel />;
   const cards = [
     ['总请求', data.totals?.requests || 0],
@@ -305,6 +315,7 @@ function Dashboard({ api }: { api: ApiClient }) {
   ];
   return (
     <section className="content">
+      <div className="toolbar compact"><h2>状态</h2><button className="smallBtn" onClick={load} disabled={refreshing}><RefreshCw className={refreshing ? 'spin' : ''} />{refreshing ? '刷新中' : '刷新'}</button></div>
       <div className="metricGrid">{cards.map(([label, value]) => <Metric key={label} label={label} value={value} />)}</div>
       <div className="panel">
         <h2>最近请求</h2>
@@ -349,23 +360,37 @@ function ApiKeys({ api, publicBase }: { api: ApiClient; publicBase: string }) {
 
 function Usage({ api }: { api: ApiClient }) {
   const [rows, setRows] = useState<any[]>([]);
-  useLoad(() => api.get('/api/usage?days=14').then((data) => setRows(data.rows)), []);
-  const max = Math.max(1, ...rows.map((row) => Number(row.requests || 0)));
+  useLoad(() => api.get('/api/usage-summary').then((data) => setRows(data.rows)), []);
   return (
     <section className="content">
       <div className="panel">
-        <h2>14 天使用数据</h2>
-        <div className="bars">
-          {rows.map((row) => <div key={row.day}><span>{row.day}</span><div><i style={{ width: `${(Number(row.requests) / max) * 100}%` }} /></div><b>{row.requests}</b></div>)}
-        </div>
+        <h2>用量统计表</h2>
+        <DataTable rows={rows} columns={['range', 'requests', 'tokens', 'latency', 'errors', 'success_rate']} />
       </div>
     </section>
   );
 }
 
-function Models({ api }: { api: ApiClient }) {
+function Models({ api, admin }: { api: ApiClient; admin: boolean }) {
   const [models, setModels] = useState<any[]>([]);
-  useLoad(() => api.get('/api/models').then((data) => setModels(data.models)), []);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  async function load() {
+    const data = await api.get('/api/models');
+    const rows = data.models || [];
+    setModels(rows);
+    setDrafts(Object.fromEntries(rows.map((model: any) => [model.id, model.display_name || model.model_id])));
+  }
+  useLoad(load, []);
+  async function saveModel(model: any) {
+    const displayName = (drafts[model.id] || '').trim();
+    if (!displayName) return;
+    await api.patch(`/api/admin/models/${model.id}`, { display_name: displayName, status: 'enabled' });
+    await load();
+  }
+  async function removeModel(model: any) {
+    await api.delete(`/api/admin/models/${model.id}`);
+    await load();
+  }
   const grouped = models.reduce<Record<string, any[]>>((acc, model) => {
     const key = model.channel_name || '未命名渠道';
     acc[key] = acc[key] || [];
@@ -376,7 +401,7 @@ function Models({ api }: { api: ApiClient }) {
     <section className="content">
       <div className="panel">
         <h2>模型广场</h2>
-        <p>渠道测试成功后会自动从上游 `/models` 同步模型。复制模型 ID 到 SillyTavern 使用。</p>
+        <p>渠道测试成功后会自动从上游 `/models` 同步模型。这里显示的模型名会返回给 SillyTavern；如需别名，可直接修改显示名。</p>
         <div className="modelGroups">
           {Object.entries(grouped).length ? Object.entries(grouped).map(([channelName, rows]) => (
             <div className="modelGroup" key={channelName}>
@@ -386,14 +411,27 @@ function Models({ api }: { api: ApiClient }) {
               </div>
               <div className="modelChips">
                 {rows.map((model) => (
-                  <button
-                    className="modelChip"
-                    key={model.id || model.model_id}
-                    onClick={() => navigator.clipboard.writeText(model.model_id)}
-                    title="点击复制模型 ID"
-                  >
-                    {model.model_id}
-                  </button>
+                  <div className="modelEditor" key={model.id || model.model_id}>
+                    <div className="modelEditorBody">
+                      {admin ? (
+                        <input
+                          aria-label="模型显示名"
+                          value={drafts[model.id] ?? model.display_name ?? model.model_id}
+                          onChange={(event) => setDrafts({ ...drafts, [model.id]: event.target.value })}
+                        />
+                      ) : (
+                        <button className="modelChip" onClick={() => navigator.clipboard.writeText(model.display_name || model.model_id)} title="点击复制模型名">
+                          {model.display_name || model.model_id}
+                        </button>
+                      )}
+                      <span>上游：{model.model_id}</span>
+                    </div>
+                    <div className="rowActions">
+                      <button className="iconBtn" onClick={() => navigator.clipboard.writeText(drafts[model.id] || model.display_name || model.model_id)} title="复制"><Copy /></button>
+                      {admin && <button className="smallBtn" onClick={() => saveModel(model)}><Save />保存</button>}
+                      {admin && <button className="iconBtn danger" onClick={() => removeModel(model)} title="隐藏"><Trash2 /></button>}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -406,9 +444,18 @@ function Models({ api }: { api: ApiClient }) {
 
 function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: SettingsShape; onSaved: (settings: SettingsShape) => void }) {
   const [form, setForm] = useState(settings);
+  const [testingNotify, setTestingNotify] = useState('');
   async function save() {
     const data = await api.put('/api/admin/settings', form);
     onSaved(data.settings);
+  }
+  async function testNotify(type: 'telegram' | 'wxpusher') {
+    setTestingNotify(type);
+    try {
+      await api.post('/api/admin/notify-test', { type });
+    } finally {
+      setTestingNotify('');
+    }
   }
   return (
     <section className="content">
@@ -424,6 +471,14 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
         <Input label="渠道检测间隔（分钟）" type="number" value={String(form.healthCheckIntervalMinutes)} onChange={(value) => setForm({ ...form, healthCheckIntervalMinutes: Number(value) })} />
         <Input label="Workers 用量检测间隔（分钟）" type="number" value={String(form.workerUsageIntervalMinutes)} onChange={(value) => setForm({ ...form, workerUsageIntervalMinutes: Number(value) })} />
         <Toggle label="推送 Workers 用量" checked={form.notifyWorkerUsage} onChange={(notifyWorkerUsage) => setForm({ ...form, notifyWorkerUsage })} />
+        <div className="settingsSection">
+          <strong>消息测试</strong>
+          <p className="hintText">Telegram 和 WxPusher 的 Token、Chat ID、UID 等在 Worker 变量里配置。</p>
+          <div className="rowActions left">
+            <button className="smallBtn" onClick={() => testNotify('telegram')} disabled={testingNotify === 'telegram'}><RefreshCw className={testingNotify === 'telegram' ? 'spin' : ''} />测试 Telegram</button>
+            <button className="smallBtn" onClick={() => testNotify('wxpusher')} disabled={testingNotify === 'wxpusher'}><RefreshCw className={testingNotify === 'wxpusher' ? 'spin' : ''} />测试 WxPusher</button>
+          </div>
+        </div>
         <button className="primaryBtn" onClick={save}><Save />保存设置</button>
       </div>
     </section>
@@ -455,6 +510,8 @@ function UsersPage({ api }: { api: ApiClient }) {
 
 function Channels({ api }: { api: ApiClient }) {
   const [channels, setChannels] = useState<any[]>([]);
+  const [checkingAll, setCheckingAll] = useState(false);
+  const [testingId, setTestingId] = useState('');
   const [form, setForm] = useState({ name: '', provider: 'openai-compatible', base_url: 'https://api.openai.com/v1', api_key: '', priority: 100, status: 'active' });
   async function load() {
     const channelData = await api.get('/api/admin/channels');
@@ -472,12 +529,22 @@ function Channels({ api }: { api: ApiClient }) {
     await load();
   }
   async function check() {
-    await api.post('/api/admin/health-check', {});
-    setTimeout(load, 1500);
+    setCheckingAll(true);
+    try {
+      await api.post('/api/admin/health-check', {});
+      await load();
+    } finally {
+      setCheckingAll(false);
+    }
   }
   async function testChannel(id: string) {
-    await api.post(`/api/admin/channels/${id}/test`, {});
-    await load();
+    setTestingId(id);
+    try {
+      await api.post(`/api/admin/channels/${id}/test`, {});
+      await load();
+    } finally {
+      setTestingId('');
+    }
   }
   return (
     <section className="content split">
@@ -490,8 +557,8 @@ function Channels({ api }: { api: ApiClient }) {
         <button className="primaryBtn"><Plus />保存渠道</button>
       </form>
       <div className="panel">
-        <div className="toolbar compact"><h2>渠道列表</h2><button className="smallBtn" onClick={check}><RefreshCw />立即检测</button></div>
-        <DataTable rows={channels} columns={['name', 'base_url', 'priority', 'status', 'health_status', 'last_checked_at']} action={(row) => <div className="rowActions"><button className="iconBtn" onClick={() => testChannel(row.id)}><RefreshCw /></button><button className="iconBtn danger" onClick={() => remove(row.id)}><Trash2 /></button></div>} />
+        <div className="toolbar compact"><h2>渠道列表</h2><button className="smallBtn" onClick={check} disabled={checkingAll}><RefreshCw className={checkingAll ? 'spin' : ''} />{checkingAll ? '检测中' : '立即检测'}</button></div>
+        <DataTable rows={channels} columns={['name', 'base_url', 'priority', 'status', 'health_status', 'last_checked_at']} action={(row) => <div className="rowActions"><button className="smallBtn" onClick={() => testChannel(row.id)} disabled={testingId === row.id}><RefreshCw className={testingId === row.id ? 'spin' : ''} />测试</button><button className="iconBtn danger" onClick={() => remove(row.id)} title="删除"><Trash2 /></button></div>} />
       </div>
     </section>
   );
@@ -499,18 +566,27 @@ function Channels({ api }: { api: ApiClient }) {
 
 function WorkerUsage({ api }: { api: ApiClient }) {
   const [rows, setRows] = useState<any[]>([]);
+  const [configured, setConfigured] = useState(true);
+  const [busy, setBusy] = useState(false);
   async function load() {
     const data = await api.get('/api/admin/worker-usage');
+    setConfigured(data.configured !== false);
     setRows(data.snapshots);
   }
   useLoad(load, []);
   async function capture() {
-    await api.post('/api/admin/worker-usage-check', {});
-    setTimeout(load, 1200);
+    setBusy(true);
+    try {
+      await api.post('/api/admin/worker-usage-check', {});
+      await load();
+    } finally {
+      setBusy(false);
+    }
   }
   return (
     <section className="content">
-      <div className="toolbar"><h2>Workers 用量监测</h2><button className="primaryBtn" onClick={capture}><RefreshCw />立即采集</button></div>
+      <div className="toolbar"><h2>Workers 用量监测</h2><button className="primaryBtn" onClick={capture} disabled={busy || !configured}><RefreshCw className={busy ? 'spin' : ''} />{busy ? '检测中' : '立即采集'}</button></div>
+      {!configured && <div className="panel"><div className="errorText">请配置 CF_ACCOUNT_ID 和 CF_API_TOKEN 变量后再检测 Workers 用量。</div></div>}
       <div className="panel"><DataTable rows={rows} columns={['created_at', 'requests', 'errors', 'cpu_time_ms', 'period_start', 'period_end']} /></div>
     </section>
   );
@@ -620,7 +696,7 @@ function makeApi(token: string, setNotice: (message: string) => void) {
       setNotice(message);
       throw new Error(message);
     }
-    if (method !== 'GET') setNotice('已保存');
+    if (method !== 'GET') setNotice(data.message || '成功');
     return data;
   }
   return {
@@ -675,7 +751,11 @@ function labelOf(key: string) {
     errors: '错误',
     cpu_time_ms: 'CPU',
     period_start: '开始',
-    period_end: '结束'
+    period_end: '结束',
+    range: '范围',
+    tokens: 'Token',
+    latency: '平均延迟',
+    success_rate: '成功率'
   };
   return labels[key] || key;
 }
