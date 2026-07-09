@@ -12,8 +12,18 @@ export interface Env {
   CF_API_TOKEN?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
+  TELEGRAM_PARSE_MODE?: string;
+  TELEGRAM_MESSAGE_THREAD_ID?: string;
+  TELEGRAM_DIRECT_MESSAGES_TOPIC_ID?: string;
+  TELEGRAM_DISABLE_NOTIFICATION?: string;
+  TELEGRAM_PROTECT_CONTENT?: string;
+  TELEGRAM_LINK_PREVIEW_DISABLED?: string;
   WXPUSHER_APP_TOKEN?: string;
   WXPUSHER_UIDS?: string;
+  WXPUSHER_TOPIC_IDS?: string;
+  WXPUSHER_URL?: string;
+  WXPUSHER_CONTENT_TYPE?: string;
+  WXPUSHER_VERIFY_PAY_TYPE?: string;
 }
 
 type AuthedUser = {
@@ -792,25 +802,14 @@ function hasWorkerUsageConfig(env: Env): boolean {
 }
 
 async function sendUsageNotifications(env: Env, message: string): Promise<void> {
-  const jobs: Promise<Response>[] = [];
+  const jobs: Promise<unknown>[] = [];
   if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID) {
-    jobs.push(fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: jsonHeaders,
-      body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: message })
-    }));
+    jobs.push(sendTelegramMessage(env, { text: message }));
   }
-  if (env.WXPUSHER_APP_TOKEN && env.WXPUSHER_UIDS) {
-    jobs.push(fetch('https://wxpusher.zjiecode.com/api/send/message', {
-      method: 'POST',
-      headers: jsonHeaders,
-      body: JSON.stringify({
-        appToken: env.WXPUSHER_APP_TOKEN,
-        content: message,
-        summary: 'Workers 用量',
-        contentType: 1,
-        uids: env.WXPUSHER_UIDS.split(',').map((item) => item.trim()).filter(Boolean)
-      })
+  if (env.WXPUSHER_APP_TOKEN) {
+    jobs.push(sendWxPusherMessage(env, {
+      content: message,
+      summary: 'Workers 用量'
     }));
   }
   await Promise.allSettled(jobs);
@@ -821,29 +820,152 @@ async function testNotification(request: Request, env: Env): Promise<Response> {
   const type = body.type === 'wxpusher' ? 'wxpusher' : 'telegram';
   const message = `Only API 测试消息：${new Date().toISOString()}`;
   if (type === 'telegram') {
-    if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return json({ error: '请配置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 变量' }, 400);
-    const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: jsonHeaders,
-      body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: message })
-    });
-    if (!res.ok) return json({ error: `Telegram 测试失败：HTTP ${res.status}` }, 400);
+    await sendTelegramMessage(env, { text: message });
     return json({ ok: true, message: 'Telegram 测试成功' });
   }
-  if (!env.WXPUSHER_APP_TOKEN || !env.WXPUSHER_UIDS) return json({ error: '请配置 WXPUSHER_APP_TOKEN 和 WXPUSHER_UIDS 变量' }, 400);
+  await sendWxPusherMessage(env, {
+    content: message,
+    summary: 'Only API 测试'
+  });
+  return json({ ok: true, message: 'WxPusher 测试成功' });
+}
+
+async function sendTelegramMessage(env: Env, input: { text: string }): Promise<any> {
+  const payload = buildTelegramPayload(env, input.text);
+  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify(payload)
+  });
+  let data: any = null;
+  try {
+    data = await res.json<any>();
+  } catch {
+    data = null;
+  }
+  if (!res.ok || data?.ok !== true) {
+    throw new HttpError(`Telegram 推送失败：${data?.description || `HTTP ${res.status}`}`, 400);
+  }
+  return data;
+}
+
+function buildTelegramPayload(env: Env, text: string): Record<string, unknown> {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) throw new HttpError('请配置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 变量', 400);
+  const payload: Record<string, unknown> = {
+    chat_id: env.TELEGRAM_CHAT_ID,
+    text: truncateTelegramText(text)
+  };
+  const parseMode = normalizeTelegramParseMode(env.TELEGRAM_PARSE_MODE);
+  if (parseMode) payload.parse_mode = parseMode;
+  const threadId = parseInteger(env.TELEGRAM_MESSAGE_THREAD_ID);
+  if (threadId !== undefined) payload.message_thread_id = threadId;
+  const directTopicId = parseInteger(env.TELEGRAM_DIRECT_MESSAGES_TOPIC_ID);
+  if (directTopicId !== undefined) payload.direct_messages_topic_id = directTopicId;
+  const disableNotification = parseBooleanFlag(env.TELEGRAM_DISABLE_NOTIFICATION);
+  if (disableNotification !== undefined) payload.disable_notification = disableNotification;
+  const protectContent = parseBooleanFlag(env.TELEGRAM_PROTECT_CONTENT);
+  if (protectContent !== undefined) payload.protect_content = protectContent;
+  const linkPreviewDisabled = parseBooleanFlag(env.TELEGRAM_LINK_PREVIEW_DISABLED);
+  if (linkPreviewDisabled !== undefined) payload.link_preview_options = { is_disabled: linkPreviewDisabled };
+  return payload;
+}
+
+function normalizeTelegramParseMode(value: string | undefined): string {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized === 'html') return 'HTML';
+  if (normalized === 'markdownv2') return 'MarkdownV2';
+  if (normalized === 'markdown') return 'Markdown';
+  return '';
+}
+
+function truncateTelegramText(value: string): string {
+  const chars = Array.from(value);
+  return chars.length > 4096 ? `${chars.slice(0, 4093).join('')}...` : value;
+}
+
+async function sendWxPusherMessage(env: Env, input: { content: string; summary: string; url?: string }): Promise<any> {
+  const payload = buildWxPusherPayload(env, input);
   const res = await fetch('https://wxpusher.zjiecode.com/api/send/message', {
     method: 'POST',
     headers: jsonHeaders,
-    body: JSON.stringify({
-      appToken: env.WXPUSHER_APP_TOKEN,
-      content: message,
-      summary: 'Only API 测试',
-      contentType: 1,
-      uids: env.WXPUSHER_UIDS.split(',').map((item) => item.trim()).filter(Boolean)
-    })
+    body: JSON.stringify(payload)
   });
-  if (!res.ok) return json({ error: `WxPusher 测试失败：HTTP ${res.status}` }, 400);
-  return json({ ok: true, message: 'WxPusher 测试成功' });
+  let data: any = null;
+  try {
+    data = await res.json<any>();
+  } catch {
+    data = null;
+  }
+  if (!res.ok) throw new HttpError(`WxPusher 推送失败：HTTP ${res.status}`, 400);
+  if (data?.code !== 1000 || data?.success === false) {
+    throw new HttpError(`WxPusher 推送失败：${data?.msg || '返回码不是 1000'}`, 400);
+  }
+  const failedTargets = Array.isArray(data?.data) ? data.data.filter((item: any) => item?.code !== 1000) : [];
+  if (failedTargets.length) {
+    const detail = failedTargets.map((item: any) => item?.status || item?.msg || item?.code).join('；');
+    throw new HttpError(`WxPusher 部分目标失败：${detail || '请检查 UID 或 Topic ID'}`, 400);
+  }
+  return data;
+}
+
+function buildWxPusherPayload(env: Env, input: { content: string; summary: string; url?: string }): Record<string, unknown> {
+  if (!env.WXPUSHER_APP_TOKEN) throw new HttpError('请配置 WXPUSHER_APP_TOKEN 变量', 400);
+  const uids = parseStringList(env.WXPUSHER_UIDS);
+  const topicIds = parseNumberList(env.WXPUSHER_TOPIC_IDS);
+  if (!uids.length && !topicIds.length) throw new HttpError('请配置 WXPUSHER_UIDS 或 WXPUSHER_TOPIC_IDS 变量', 400);
+
+  const payload: Record<string, unknown> = {
+    appToken: env.WXPUSHER_APP_TOKEN,
+    content: input.content,
+    summary: input.summary.slice(0, 100),
+    contentType: normalizeWxPusherContentType(env.WXPUSHER_CONTENT_TYPE)
+  };
+  if (uids.length) payload.uids = uids;
+  if (topicIds.length) payload.topicIds = topicIds;
+  const url = (input.url || env.WXPUSHER_URL || '').trim();
+  if (url) payload.url = url;
+  const verifyPayType = normalizeWxPusherVerifyPayType(env.WXPUSHER_VERIFY_PAY_TYPE);
+  if (verifyPayType !== undefined) payload.verifyPayType = verifyPayType;
+  return payload;
+}
+
+function parseStringList(value: string | undefined): string[] {
+  return String(value || '')
+    .split(/[,\n;，；]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function parseNumberList(value: string | undefined): number[] {
+  return parseStringList(value)
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item));
+}
+
+function parseInteger(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : undefined;
+}
+
+function parseBooleanFlag(value: string | undefined): boolean | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return undefined;
+}
+
+function normalizeWxPusherContentType(value: string | undefined): number {
+  const contentType = Number(value || 1);
+  return [1, 2, 3].includes(contentType) ? contentType : 1;
+}
+
+function normalizeWxPusherVerifyPayType(value: string | undefined): number | undefined {
+  if (value === undefined || value === '') return undefined;
+  const verifyPayType = Number(value);
+  return [0, 1, 2].includes(verifyPayType) ? verifyPayType : 0;
 }
 
 async function sendVerificationEmail(env: Env, email: string, token: string): Promise<void> {

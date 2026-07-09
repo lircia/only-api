@@ -473,7 +473,7 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
         <Toggle label="推送 Workers 用量" checked={form.notifyWorkerUsage} onChange={(notifyWorkerUsage) => setForm({ ...form, notifyWorkerUsage })} />
         <div className="settingsSection">
           <strong>消息测试</strong>
-          <p className="hintText">Telegram 和 WxPusher 的 Token、Chat ID、UID 等在 Worker 变量里配置。</p>
+          <p className="hintText">Telegram 的 Token / Chat ID / Thread ID，WxPusher 的 AppToken / UID / Topic ID 等都在 Worker 变量里配置。</p>
           <div className="rowActions left">
             <button className="smallBtn" onClick={() => testNotify('telegram')} disabled={testingNotify === 'telegram'}><RefreshCw className={testingNotify === 'telegram' ? 'spin' : ''} />测试 Telegram</button>
             <button className="smallBtn" onClick={() => testNotify('wxpusher')} disabled={testingNotify === 'wxpusher'}><RefreshCw className={testingNotify === 'wxpusher' ? 'spin' : ''} />测试 WxPusher</button>

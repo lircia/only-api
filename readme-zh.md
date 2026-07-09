@@ -113,14 +113,22 @@ apps/api/migrations/0001_initial.sql
 | `CF_ACCOUNT_ID` | Variable | Cloudflare Account ID |
 | `CF_API_TOKEN` | Secret | 可读取 Workers 用量的 Token |
 
-可选消息推送：
+推送必要变量：
+
+Telegram 必要变量：
 
 | 名称 | 类型 | 说明 |
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Secret | Telegram 机器人 Token |
 | `TELEGRAM_CHAT_ID` | Variable | Telegram 群组或聊天 ID |
+
+WxPusher 必要变量：
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
 | `WXPUSHER_APP_TOKEN` | Secret | WxPusher AppToken |
-| `WXPUSHER_UIDS` | Variable | WxPusher 用户 UID，多个用英文逗号分隔 |
+| `WXPUSHER_UIDS` | Variable | WxPusher 用户 UID，多个用英文逗号分隔；未配置 `WXPUSHER_TOPIC_IDS` 时必填 |
+| `WXPUSHER_TOPIC_IDS` | Variable | WxPusher Topic ID，多个用英文逗号分隔；未配置 `WXPUSHER_UIDS` 时必填 |
 
 ## 部署 4：部署 Pages 前端
 
@@ -184,3 +192,21 @@ Model: 从模型广场复制
 | OpenAI | `https://api.openai.com/v1` |
 | OpenRouter | `https://openrouter.ai/api/v1` |
 | 其他兼容服务 | 通常是 `https://域名/v1` |
+
+## 高级可选推送变量
+
+下面这些不是普通部署必填变量，适合已经熟悉 Telegram 话题、消息格式、链接预览或 WxPusher 付费主题的人使用。
+
+| 名称 | 类型 | 说明 |
+| --- | --- | --- |
+| `TELEGRAM_PARSE_MODE` | Variable | `HTML`、`MarkdownV2` 或 `Markdown` |
+| `TELEGRAM_MESSAGE_THREAD_ID` | Variable | Telegram 群组论坛话题 Thread ID |
+| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Variable | Telegram Direct Messages Topic ID |
+| `TELEGRAM_DISABLE_NOTIFICATION` | Variable | 布尔值，静默通知 |
+| `TELEGRAM_PROTECT_CONTENT` | Variable | 布尔值，保护内容不被转发/保存 |
+| `TELEGRAM_LINK_PREVIEW_DISABLED` | Variable | 布尔值，关闭链接预览 |
+| `WXPUSHER_URL` | Variable | 消息原文链接 |
+| `WXPUSHER_CONTENT_TYPE` | Variable | `1` 文字，`2` HTML，`3` Markdown，默认 `1` |
+| `WXPUSHER_VERIFY_PAY_TYPE` | Variable | `0` 不验证，`1` 只发付费用户，`2` 只发未订阅或过期用户 |
+
+此仓库的维护为无限期不维护。

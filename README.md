@@ -147,14 +147,22 @@ Optional Workers usage check:
 
 If these Workers usage variables are missing, the dashboard will show a clear “please configure variables” message.
 
-Optional notifications:
+Notification variables:
+
+Telegram required variables:
 
 | Name | Type | Notes |
 | --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Secret | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | Variable | Telegram chat or group ID |
+
+WxPusher required variables:
+
+| Name | Type | Notes |
+| --- | --- | --- |
 | `WXPUSHER_APP_TOKEN` | Secret | WxPusher AppToken |
-| `WXPUSHER_UIDS` | Variable | comma-separated WxPusher user IDs |
+| `WXPUSHER_UIDS` | Variable | comma-separated WxPusher user IDs; required unless `WXPUSHER_TOPIC_IDS` is set |
+| `WXPUSHER_TOPIC_IDS` | Variable | comma-separated WxPusher topic IDs; required unless `WXPUSHER_UIDS` is set |
 
 ## Deployment Step 4: Deploy Pages
 
@@ -282,3 +290,21 @@ npm run typecheck
 npm run build:web
 npm run deploy:api
 ```
+
+## Advanced Optional Push Variables
+
+These variables are not required for normal deployment. They are for users who already understand Telegram forum topics, message formatting, link previews, or WxPusher paid-topic behavior.
+
+| Name | Type | Notes |
+| --- | --- | --- |
+| `TELEGRAM_PARSE_MODE` | Variable | `HTML`, `MarkdownV2`, or `Markdown` |
+| `TELEGRAM_MESSAGE_THREAD_ID` | Variable | Telegram group forum topic thread ID |
+| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Variable | Telegram direct messages topic ID |
+| `TELEGRAM_DISABLE_NOTIFICATION` | Variable | boolean, silent notification |
+| `TELEGRAM_PROTECT_CONTENT` | Variable | boolean, protect forwarded/saved content |
+| `TELEGRAM_LINK_PREVIEW_DISABLED` | Variable | boolean, disable link previews |
+| `WXPUSHER_URL` | Variable | link attached to the message |
+| `WXPUSHER_CONTENT_TYPE` | Variable | `1` text, `2` HTML, `3` Markdown; default `1` |
+| `WXPUSHER_VERIFY_PAY_TYPE` | Variable | `0` no check, `1` paid users, `2` unpaid/expired users |
+
+此仓库的维护为无限期不维护。

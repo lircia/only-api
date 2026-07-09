@@ -101,10 +101,16 @@ Optional variables:
 | `TURNSTILE_SECRET_KEY` | Secret | Turnstile secret |
 | `CF_ACCOUNT_ID` | Variable | Cloudflare account ID |
 | `CF_API_TOKEN` | Secret | Workers usage token |
+
+Notification required variables:
+
+| Name | Type | Notes |
+| --- | --- | --- |
 | `TELEGRAM_BOT_TOKEN` | Secret | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | Variable | Telegram chat ID |
 | `WXPUSHER_APP_TOKEN` | Secret | WxPusher AppToken |
-| `WXPUSHER_UIDS` | Variable | comma-separated WxPusher UIDs |
+| `WXPUSHER_UIDS` | Variable | comma-separated WxPusher UIDs; required unless `WXPUSHER_TOPIC_IDS` is set |
+| `WXPUSHER_TOPIC_IDS` | Variable | comma-separated WxPusher topic IDs; required unless `WXPUSHER_UIDS` is set |
 
 ## Deployment 4: Pages Frontend
 
@@ -157,3 +163,21 @@ Channel Base URL examples:
 | --- | --- |
 | OpenAI | `https://api.openai.com/v1` |
 | OpenRouter | `https://openrouter.ai/api/v1` |
+
+## Advanced Optional Push Variables
+
+These variables are not required for normal deployment. They are for users who already understand Telegram topics, message formatting, link previews, or WxPusher paid-topic behavior.
+
+| Name | Type | Notes |
+| --- | --- | --- |
+| `TELEGRAM_PARSE_MODE` | Variable | `HTML`, `MarkdownV2`, or `Markdown` |
+| `TELEGRAM_MESSAGE_THREAD_ID` | Variable | Telegram forum topic thread ID |
+| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Variable | Telegram direct messages topic ID |
+| `TELEGRAM_DISABLE_NOTIFICATION` | Variable | boolean, silent notification |
+| `TELEGRAM_PROTECT_CONTENT` | Variable | boolean, protect content |
+| `TELEGRAM_LINK_PREVIEW_DISABLED` | Variable | boolean, disable link previews |
+| `WXPUSHER_URL` | Variable | message link |
+| `WXPUSHER_CONTENT_TYPE` | Variable | `1` text, `2` HTML, `3` Markdown; default `1` |
+| `WXPUSHER_VERIFY_PAY_TYPE` | Variable | `0` no check, `1` paid users, `2` unpaid/expired users |
+
+此仓库的维护为无限期不维护。
