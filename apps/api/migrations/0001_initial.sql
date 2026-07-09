@@ -110,6 +110,7 @@ INSERT OR IGNORE INTO system_settings (key, value) VALUES
   ('siteName', '"API Relay"'),
   ('appMode', '"self"'),
   ('registrationEnabled', 'true'),
+  ('emailVerificationEnabled', 'false'),
   ('captchaEnabled', 'false'),
   ('captchaSiteKey', '""'),
   ('healthCheckIntervalMinutes', '60'),

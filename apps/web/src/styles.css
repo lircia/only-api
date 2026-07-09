@@ -366,6 +366,12 @@ th {
   text-align: right;
 }
 
+.rowActions {
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .empty,
 .centerPanel {
   min-height: 160px;
@@ -468,6 +474,61 @@ code {
   display: block;
   height: 100%;
   background: #d7ff5f;
+}
+
+.modelGroups {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.modelGroups h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.modelGroup {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #ece9e1;
+  border-radius: 8px;
+  background: #fbfaf7;
+}
+
+.modelGroup > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modelGroup span,
+.modelGroup p,
+.modelGroup em {
+  color: #6b756e;
+  font-size: 13px;
+  font-style: normal;
+  margin: 0;
+}
+
+.modelChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.modelChips code,
+.modelChip {
+  max-width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: #edf1e7;
+  color: #1f2933;
+  font-size: 12px;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
 .turnstile {

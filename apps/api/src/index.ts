@@ -40,6 +40,7 @@ const defaultPublicSettings = {
   siteName: 'API Relay',
   appMode: 'self',
   registrationEnabled: true,
+  emailVerificationEnabled: false,
   captchaEnabled: false,
   captchaSiteKey: '',
   apiPublicBaseUrl: ''
@@ -106,6 +107,10 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     ctx.waitUntil(checkChannelHealth(env));
     return json({ ok: true });
   }
+  if (method === 'POST' && path.startsWith('/api/admin/channels/') && path.endsWith('/test')) {
+    const channelId = path.split('/').at(-2) || '';
+    return json(await checkSingleChannelHealth(env, channelId));
+  }
   if (method === 'POST' && path === '/api/admin/worker-usage-check') {
     ctx.waitUntil(captureWorkerUsage(env));
     return json({ ok: true });
@@ -128,6 +133,7 @@ async function getBootstrap(env: Env): Promise<Response> {
       siteName: settings.siteName ?? defaultPublicSettings.siteName,
       appMode: settings.appMode ?? defaultPublicSettings.appMode,
       registrationEnabled: settings.registrationEnabled ?? true,
+      emailVerificationEnabled: isEmailVerificationRequired(settings),
       captchaEnabled: settings.captchaEnabled ?? false,
       captchaSiteKey: settings.captchaSiteKey ?? '',
       apiPublicBaseUrl: env.API_PUBLIC_BASE_URL ?? ''
@@ -153,6 +159,7 @@ async function setupSuperAdmin(request: Request, env: Env): Promise<Response> {
     siteName: body.siteName || 'API Relay',
     appMode: body.appMode === 'multi' ? 'multi' : 'self',
     registrationEnabled: body.appMode === 'multi',
+    emailVerificationEnabled: body.appMode === 'multi',
     captchaEnabled: false,
     healthCheckIntervalMinutes: 60,
     workerUsageIntervalMinutes: 60
@@ -170,11 +177,21 @@ async function registerUser(request: Request, env: Env): Promise<Response> {
   assertPassword(body.password);
   if (settings.captchaEnabled === true) await verifyCaptcha(body.captchaToken, env);
 
+  const requireEmailVerification = isEmailVerificationRequired(settings);
+  if (requireEmailVerification && (!env.RESEND_API_KEY || !env.RESEND_FROM)) {
+    return json({ error: '多人配置需要先配置 Resend 邮件发送变量' }, 400);
+  }
+
   const userId = id('usr');
   const passwordHash = await hashPassword(body.password);
+  const verifiedAt = requireEmailVerification ? null : new Date().toISOString();
   await env.DB.prepare(
-    'INSERT INTO users (id, email, name, password_hash, role, status) VALUES (?, ?, ?, ?, ?, ?)'
-  ).bind(userId, body.email.toLowerCase(), body.name || body.email.split('@')[0], passwordHash, 'user', 'active').run();
+    'INSERT INTO users (id, email, name, password_hash, role, status, email_verified_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).bind(userId, body.email.toLowerCase(), body.name || body.email.split('@')[0], passwordHash, 'user', 'active', verifiedAt).run();
+
+  if (!requireEmailVerification) {
+    return json({ ok: true, message: '注册成功，可以直接登录' }, 201);
+  }
 
   const rawToken = randomToken(32);
   await env.DB.prepare(
@@ -206,6 +223,8 @@ async function loginUser(request: Request, env: Env): Promise<Response> {
   const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(body.email.toLowerCase()).first<any>();
   if (!user || !(await verifyPassword(body.password || '', user.password_hash))) return json({ error: '邮箱或密码错误' }, 401);
   if (user.status !== 'active') return json({ error: '账号已停用' }, 403);
+  const settings = await getSettings(env);
+  if (isEmailVerificationRequired(settings) && !user.email_verified_at) return json({ error: '请先完成邮箱验证' }, 403);
   const token = await createSession(env, user.id);
   return json({ token, user: cleanUser(user) });
 }
@@ -272,7 +291,7 @@ async function deleteApiKey(env: Env, user: AuthedUser, keyId: string): Promise<
 
 async function listModels(env: Env): Promise<Response> {
   const rows = await env.DB.prepare(
-    'SELECT m.id, m.model_id, m.display_name, m.status, c.name AS channel_name FROM model_catalog m LEFT JOIN channels c ON c.id = m.channel_id WHERE m.status = "enabled" ORDER BY m.model_id ASC'
+    'SELECT m.id, m.channel_id, m.model_id, m.display_name, m.status, c.name AS channel_name FROM model_catalog m LEFT JOIN channels c ON c.id = m.channel_id WHERE m.status = "enabled" ORDER BY m.model_id ASC'
   ).all<any>();
   return json({ models: rows.results || [] });
 }
@@ -287,6 +306,7 @@ async function updateAdminSettings(request: Request, env: Env): Promise<Response
     'siteName',
     'appMode',
     'registrationEnabled',
+    'emailVerificationEnabled',
     'captchaEnabled',
     'captchaSiteKey',
     'healthCheckIntervalMinutes',
@@ -320,7 +340,12 @@ async function updateUser(request: Request, env: Env, userId: string): Promise<R
 
 async function listChannels(env: Env): Promise<Response> {
   const rows = await env.DB.prepare(
-    'SELECT id, name, provider, base_url, priority, status, health_status, health_message, last_checked_at, created_at FROM channels ORDER BY priority ASC, created_at DESC'
+    `SELECT c.id, c.name, c.provider, c.base_url, c.priority, c.status, c.health_status, c.health_message, c.last_checked_at, c.created_at,
+      GROUP_CONCAT(m.model_id, char(10)) AS models
+     FROM channels c
+     LEFT JOIN model_catalog m ON m.channel_id = c.id AND m.status = "enabled"
+     GROUP BY c.id
+     ORDER BY c.priority ASC, c.created_at DESC`
   ).all<any>();
   return json({ channels: rows.results || [] });
 }
@@ -332,7 +357,7 @@ async function createChannel(request: Request, env: Env): Promise<Response> {
   await env.DB.prepare(
     'INSERT INTO channels (id, name, provider, base_url, api_key, priority, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).bind(channelId, body.name, body.provider || 'openai-compatible', normalizeBaseUrl(body.base_url), body.api_key, Number(body.priority || 100), body.status || 'active').run();
-  await refreshModelsForChannel(env, channelId);
+  if (parseModels(body.models).length) await saveChannelModels(env, channelId, body.models);
   return json({ id: channelId }, 201);
 }
 
@@ -342,13 +367,19 @@ async function updateChannel(request: Request, env: Env, channelId: string): Pro
   await env.DB.prepare(
     'UPDATE channels SET name = ?, provider = ?, base_url = ?, api_key = ?, priority = ?, status = ?, updated_at = ? WHERE id = ?'
   ).bind(body.name, body.provider || 'openai-compatible', normalizeBaseUrl(body.base_url), body.api_key, Number(body.priority || 100), body.status || 'active', new Date().toISOString(), channelId).run();
-  await refreshModelsForChannel(env, channelId);
+  if ('models' in body) await saveChannelModels(env, channelId, body.models);
   return json({ ok: true });
 }
 
 async function deleteChannel(env: Env, channelId: string): Promise<Response> {
   await env.DB.prepare('DELETE FROM channels WHERE id = ?').bind(channelId).run();
   return json({ ok: true });
+}
+
+async function updateChannelModels(request: Request, env: Env, channelId: string): Promise<Response> {
+  const body = await readJson(request);
+  await saveChannelModels(env, channelId, body.models);
+  return json({ ok: true, models: parseModels(body.models) });
 }
 
 async function listWorkerUsage(env: Env): Promise<Response> {
@@ -359,11 +390,14 @@ async function listWorkerUsage(env: Env): Promise<Response> {
 async function handleRelay(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const started = Date.now();
   const relayKey = await requireApiKey(request, env);
+  const url = new URL(request.url);
+  if (request.method.toUpperCase() === 'GET' && url.pathname === '/v1/models') {
+    return listRelayModels(env);
+  }
   const channel = await pickChannel(env);
   if (!channel) return json({ error: '没有可用渠道' }, 503);
 
-  const url = new URL(request.url);
-  const target = `${channel.base_url}${url.pathname.replace(/^\/v1/, '/v1')}${url.search}`;
+  const target = buildUpstreamUrl(channel.base_url, url.pathname, url.search);
   const headers = new Headers(request.headers);
   headers.set('authorization', `Bearer ${channel.api_key}`);
   headers.delete('host');
@@ -496,44 +530,101 @@ async function runScheduledJobs(env: Env): Promise<void> {
 async function checkChannelHealth(env: Env): Promise<void> {
   const rows = await env.DB.prepare('SELECT * FROM channels WHERE status = "active" ORDER BY priority ASC LIMIT 50').all<any>();
   for (const channel of rows.results || []) {
-    try {
-      const res = await fetch(`${normalizeBaseUrl(channel.base_url)}/models`, {
-        headers: { authorization: `Bearer ${channel.api_key}` },
-        signal: AbortSignal.timeout(12000)
-      });
-      const ok = res.ok;
-      await env.DB.prepare('UPDATE channels SET health_status = ?, health_message = ?, last_checked_at = ? WHERE id = ?')
-        .bind(ok ? 'ok' : 'error', ok ? '模型接口可用' : `HTTP ${res.status}`, new Date().toISOString(), channel.id).run();
-      if (ok) await refreshModelsForChannel(env, channel.id);
-    } catch (error) {
-      await env.DB.prepare('UPDATE channels SET health_status = "error", health_message = ?, last_checked_at = ? WHERE id = ?')
-        .bind(getErrorMessage(error).slice(0, 200), new Date().toISOString(), channel.id).run();
-    }
+    await checkSingleChannelHealth(env, channel.id);
   }
   await saveSettings(env, { lastHealthCheckAt: new Date().toISOString() });
 }
 
-async function refreshModelsForChannel(env: Env, channelId: string): Promise<void> {
+async function checkSingleChannelHealth(env: Env, channelId: string): Promise<Record<string, unknown>> {
   const channel = await env.DB.prepare('SELECT * FROM channels WHERE id = ?').bind(channelId).first<any>();
-  if (!channel) return;
+  if (!channel) throw new HttpError('渠道不存在', 404);
   try {
-    const res = await fetch(`${normalizeBaseUrl(channel.base_url)}/models`, {
+    const res = await fetch(buildUpstreamUrl(channel.base_url, '/v1/models'), {
       headers: { authorization: `Bearer ${channel.api_key}` },
       signal: AbortSignal.timeout(12000)
     });
-    if (!res.ok) return;
+    const ok = res.ok;
+    await env.DB.prepare('UPDATE channels SET health_status = ?, health_message = ?, last_checked_at = ? WHERE id = ?')
+      .bind(ok ? 'ok' : 'error', ok ? '模型接口可用' : `HTTP ${res.status}`, new Date().toISOString(), channel.id).run();
+    const modelCount = ok ? await refreshModelsForChannel(env, channel.id) : 0;
+    return { ok, status: res.status, modelCount };
+  } catch (error) {
+    const message = getErrorMessage(error).slice(0, 200);
+    await env.DB.prepare('UPDATE channels SET health_status = "error", health_message = ?, last_checked_at = ? WHERE id = ?')
+      .bind(message, new Date().toISOString(), channel.id).run();
+    return { ok: false, error: message };
+  }
+}
+
+async function refreshModelsForChannel(env: Env, channelId: string): Promise<number> {
+  const channel = await env.DB.prepare('SELECT * FROM channels WHERE id = ?').bind(channelId).first<any>();
+  if (!channel) return 0;
+  try {
+    const res = await fetch(buildUpstreamUrl(channel.base_url, '/v1/models'), {
+      headers: { authorization: `Bearer ${channel.api_key}` },
+      signal: AbortSignal.timeout(12000)
+    });
+    if (!res.ok) return 0;
     const data = await res.json<any>();
     const models = Array.isArray(data.data) ? data.data : [];
-    const statements = models.slice(0, 200).map((item: any) => {
+    await env.DB.prepare('DELETE FROM model_catalog WHERE channel_id = ?').bind(channelId).run();
+    const seen = new Set<string>();
+    const statements = models.slice(0, 500).map((item: any) => {
       const modelId = String(item.id || item.model || '').trim();
+      if (!modelId || seen.has(modelId)) return null;
+      seen.add(modelId);
       return env.DB.prepare(
-        'INSERT OR IGNORE INTO model_catalog (id, channel_id, model_id, display_name, status) VALUES (?, ?, ?, ?, "enabled")'
+        'INSERT INTO model_catalog (id, channel_id, model_id, display_name, status) VALUES (?, ?, ?, ?, "enabled")'
       ).bind(id('mdl'), channelId, modelId, modelId);
     }).filter(Boolean);
     if (statements.length) await env.DB.batch(statements);
+    return statements.length;
   } catch {
     // Health check will surface the failure; model sync is opportunistic.
+    return 0;
   }
+}
+
+async function saveChannelModels(env: Env, channelId: string, input: unknown): Promise<void> {
+  const models = parseModels(input);
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare('DELETE FROM model_catalog WHERE channel_id = ?').bind(channelId)
+  ];
+  for (const modelId of models) {
+    statements.push(env.DB.prepare(
+      'INSERT INTO model_catalog (id, channel_id, model_id, display_name, status) VALUES (?, ?, ?, ?, "enabled")'
+    ).bind(id('mdl'), channelId, modelId, modelId));
+  }
+  await env.DB.batch(statements);
+}
+
+function parseModels(input: unknown): string[] {
+  const raw = Array.isArray(input) ? input.join('\n') : String(input || '');
+  const seen = new Set<string>();
+  return raw
+    .split(/[\n,，]+/)
+    .map((item) => item.trim())
+    .filter((item) => item && !seen.has(item) && seen.add(item))
+    .slice(0, 200);
+}
+
+async function listRelayModels(env: Env): Promise<Response> {
+  const rows = await env.DB.prepare(
+    `SELECT m.model_id, c.name AS channel_name
+     FROM model_catalog m
+     LEFT JOIN channels c ON c.id = m.channel_id
+     WHERE m.status = "enabled"
+     ORDER BY m.model_id ASC`
+  ).all<any>();
+  return json({
+    object: 'list',
+    data: (rows.results || []).map((row: any) => ({
+      id: row.model_id,
+      object: 'model',
+      created: 0,
+      owned_by: row.channel_name || 'relay'
+    }))
+  });
 }
 
 async function captureWorkerUsage(env: Env): Promise<void> {
@@ -667,7 +758,11 @@ async function getSettings(env: Env): Promise<Record<string, any>> {
       settings[row.key] = row.value;
     }
   }
-  return { ...defaultPublicSettings, ...settings };
+  const merged = { ...defaultPublicSettings, ...settings };
+  if (!Object.prototype.hasOwnProperty.call(settings, 'emailVerificationEnabled')) {
+    merged.emailVerificationEnabled = merged.appMode === 'multi';
+  }
+  return merged;
 }
 
 async function saveSettings(env: Env, settings: Record<string, unknown>): Promise<void> {
@@ -700,6 +795,11 @@ function isAdmin(user: AuthedUser): boolean {
   return user.role === 'admin' || user.role === 'super_admin';
 }
 
+function isEmailVerificationRequired(settings: Record<string, any>): boolean {
+  if (typeof settings.emailVerificationEnabled === 'boolean') return settings.emailVerificationEnabled;
+  return settings.appMode === 'multi';
+}
+
 function validateChannel(body: any, _requireExisting = false): void {
   if (!body.name || !body.base_url || !body.api_key) throw new HttpError('渠道名称、Base URL 和 API Key 必填', 400);
   try {
@@ -710,7 +810,22 @@ function validateChannel(body: any, _requireExisting = false): void {
 }
 
 function normalizeBaseUrl(value: string): string {
-  return value.replace(/\/+$/, '');
+  const url = new URL(value.trim());
+  url.pathname = url.pathname
+    .replace(/\/+$/, '')
+    .replace(/\/v1\/chat\/completions$/i, '/v1')
+    .replace(/\/v1\/chat$/i, '/v1')
+    .replace(/\/v1$/i, '/v1');
+  return url.toString().replace(/\/+$/, '');
+}
+
+function buildUpstreamUrl(baseUrl: string, relayPath: string, search = ''): string {
+  const base = normalizeBaseUrl(baseUrl);
+  if (base.match(/\/v1$/i)) {
+    const suffix = relayPath.replace(/^\/v1/, '') || '';
+    return `${base}${suffix}${search}`;
+  }
+  return `${base}${relayPath}${search}`;
 }
 
 function getBearerToken(request: Request): string {

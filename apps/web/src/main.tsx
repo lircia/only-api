@@ -32,6 +32,7 @@ type SettingsShape = {
   siteName: string;
   appMode: 'self' | 'multi';
   registrationEnabled: boolean;
+  emailVerificationEnabled: boolean;
   captchaEnabled: boolean;
   captchaSiteKey: string;
   healthCheckIntervalMinutes: number;
@@ -49,6 +50,7 @@ const defaultSettings: SettingsShape = {
   siteName: 'API Relay',
   appMode: 'self',
   registrationEnabled: true,
+  emailVerificationEnabled: false,
   captchaEnabled: false,
   captchaSiteKey: '',
   healthCheckIntervalMinutes: 60,
@@ -130,7 +132,7 @@ function App() {
     { key: 'dashboard', label: '总览', icon: <Gauge /> },
     { key: 'keys', label: 'API Key', icon: <KeyRound /> },
     { key: 'usage', label: '用量', icon: <BarChart3 /> },
-    { key: 'models', label: '模型', icon: <Server /> },
+    { key: 'models', label: '模型广场', icon: <Server /> },
     { key: 'settings', label: '系统设置', icon: <Settings />, admin: true },
     { key: 'users', label: '用户设置', icon: <Users />, admin: true },
     { key: 'channels', label: '渠道设置', icon: <Activity />, admin: true },
@@ -364,7 +366,42 @@ function Usage({ api }: { api: ApiClient }) {
 function Models({ api }: { api: ApiClient }) {
   const [models, setModels] = useState<any[]>([]);
   useLoad(() => api.get('/api/models').then((data) => setModels(data.models)), []);
-  return <section className="content"><div className="panel"><h2>可用模型</h2><DataTable rows={models} columns={['model_id', 'display_name', 'channel_name', 'status']} /></div></section>;
+  const grouped = models.reduce<Record<string, any[]>>((acc, model) => {
+    const key = model.channel_name || '未命名渠道';
+    acc[key] = acc[key] || [];
+    acc[key].push(model);
+    return acc;
+  }, {});
+  return (
+    <section className="content">
+      <div className="panel">
+        <h2>模型广场</h2>
+        <p>渠道测试成功后会自动从上游 `/models` 同步模型。复制模型 ID 到 SillyTavern 使用。</p>
+        <div className="modelGroups">
+          {Object.entries(grouped).length ? Object.entries(grouped).map(([channelName, rows]) => (
+            <div className="modelGroup" key={channelName}>
+              <div>
+                <strong>{channelName}</strong>
+                <span>{rows.length} 个模型</span>
+              </div>
+              <div className="modelChips">
+                {rows.map((model) => (
+                  <button
+                    className="modelChip"
+                    key={model.id || model.model_id}
+                    onClick={() => navigator.clipboard.writeText(model.model_id)}
+                    title="点击复制模型 ID"
+                  >
+                    {model.model_id}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )) : <div className="empty">暂无模型。请到渠道设置里测试渠道，同步成功后会显示在这里。</div>}
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: SettingsShape; onSaved: (settings: SettingsShape) => void }) {
@@ -378,8 +415,10 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
       <div className="panel settingsGrid">
         <h2>系统设置</h2>
         <Input label="站点名称" value={form.siteName} onChange={(siteName) => setForm({ ...form, siteName })} />
-        <Segmented value={form.appMode} options={[['self', '自用配置'], ['multi', '多人配置']]} onChange={(appMode) => setForm({ ...form, appMode: appMode as 'self' | 'multi' })} />
+        <Segmented value={form.appMode} options={[['self', '自用配置'], ['multi', '多人配置']]} onChange={(appMode) => setForm({ ...form, appMode: appMode as 'self' | 'multi', emailVerificationEnabled: appMode === 'multi' })} />
+        <p className="hintText">自用配置默认关闭邮箱验证；多人配置默认启用邮箱验证，可按需要手动调整。</p>
         <Toggle label="开放注册" checked={form.registrationEnabled} onChange={(registrationEnabled) => setForm({ ...form, registrationEnabled })} />
+        <Toggle label="邮箱验证" checked={form.emailVerificationEnabled} onChange={(emailVerificationEnabled) => setForm({ ...form, emailVerificationEnabled })} />
         <Toggle label="人机验证" checked={form.captchaEnabled} onChange={(captchaEnabled) => setForm({ ...form, captchaEnabled })} />
         <Input label="Turnstile Site Key" value={form.captchaSiteKey || ''} onChange={(captchaSiteKey) => setForm({ ...form, captchaSiteKey })} />
         <Input label="渠道检测间隔（分钟）" type="number" value={String(form.healthCheckIntervalMinutes)} onChange={(value) => setForm({ ...form, healthCheckIntervalMinutes: Number(value) })} />
@@ -418,8 +457,8 @@ function Channels({ api }: { api: ApiClient }) {
   const [channels, setChannels] = useState<any[]>([]);
   const [form, setForm] = useState({ name: '', provider: 'openai-compatible', base_url: 'https://api.openai.com/v1', api_key: '', priority: 100, status: 'active' });
   async function load() {
-    const data = await api.get('/api/admin/channels');
-    setChannels(data.channels);
+    const channelData = await api.get('/api/admin/channels');
+    setChannels(channelData.channels);
   }
   useLoad(load, []);
   async function save(event: React.FormEvent) {
@@ -434,6 +473,11 @@ function Channels({ api }: { api: ApiClient }) {
   }
   async function check() {
     await api.post('/api/admin/health-check', {});
+    setTimeout(load, 1500);
+  }
+  async function testChannel(id: string) {
+    await api.post(`/api/admin/channels/${id}/test`, {});
+    await load();
   }
   return (
     <section className="content split">
@@ -447,7 +491,7 @@ function Channels({ api }: { api: ApiClient }) {
       </form>
       <div className="panel">
         <div className="toolbar compact"><h2>渠道列表</h2><button className="smallBtn" onClick={check}><RefreshCw />立即检测</button></div>
-        <DataTable rows={channels} columns={['name', 'base_url', 'priority', 'status', 'health_status', 'last_checked_at']} action={(row) => <button className="iconBtn danger" onClick={() => remove(row.id)}><Trash2 /></button>} />
+        <DataTable rows={channels} columns={['name', 'base_url', 'priority', 'status', 'health_status', 'last_checked_at']} action={(row) => <div className="rowActions"><button className="iconBtn" onClick={() => testChannel(row.id)}><RefreshCw /></button><button className="iconBtn danger" onClick={() => remove(row.id)}><Trash2 /></button></div>} />
       </div>
     </section>
   );
@@ -593,7 +637,7 @@ function pageTitle(active: NavKey) {
     dashboard: '总览',
     keys: 'API Key',
     usage: '用量统计',
-    models: '可用模型',
+    models: '模型广场',
     settings: '系统设置',
     users: '用户设置',
     channels: '渠道设置',
@@ -638,8 +682,22 @@ function labelOf(key: string) {
 
 function formatCell(value: unknown) {
   if (value === null || value === undefined || value === '') return '—';
-  if (typeof value === 'string' && value.includes('T')) return value.replace('T', ' ').slice(0, 19);
+  if (typeof value === 'string' && isDateTime(value)) return formatChinaTime(value);
   return String(value);
+}
+
+function isDateTime(value: string) {
+  return /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(value);
+}
+
+function formatChinaTime(value: string) {
+  const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+  const utcText = /z$/i.test(normalized) ? normalized : `${normalized}Z`;
+  const date = new Date(utcText);
+  if (Number.isNaN(date.getTime())) return value;
+  const shifted = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+  const pad = (input: number) => String(input).padStart(2, '0');
+  return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())} ${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}:${pad(shifted.getUTCSeconds())}`;
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
