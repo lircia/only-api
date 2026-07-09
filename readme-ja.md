@@ -1,183 +1,183 @@
 # Only API
 
-Only API は Cloudflare Workers と Pages にデプロイできる OpenAI-compatible API gateway です。ログイン、登録、メール確認、API Key、チャンネル管理、Model Square、利用統計、Workers 使用量チェック、Telegram / WxPusher 通知に対応しています。
+Only API は Cloudflare Workers と Pages にデプロイできる OpenAI 互換 API ゲートウェイです。ログイン、登録、メール確認、API Key、チャンネル管理、モデル広場、利用統計、Workers 使用量確認、Telegram / WxPusher 通知に対応しています。
 
-Default English README: [README.md](README.md)。他の言語： [中文](readme-zh.md) | [Deutsch](readme-de.md) | [Русский](readme-ru.md) | [العربية](readme-ar.md) | [Ελληνικά](readme-el.md)
+既定の英語版は [README.md](README.md) です。他の言語: [中国語](readme-zh.md) | [ドイツ語](readme-de.md) | [ロシア語](readme-ru.md) | [アラビア語](readme-ar.md) | [ギリシャ語](readme-el.md)
 
-## Project Paths
+## プロジェクト構成
 
-| Purpose | Path |
+| 用途 | パス |
 | --- | --- |
-| Pages frontend | `apps/web` |
-| Worker backend | `apps/api/src/index.ts` |
-| D1 schema SQL | `apps/api/migrations/0001_initial.sql` |
-| Dependencies | `package.json` |
+| Pages フロントエンド | `apps/web` |
+| Worker バックエンド | `apps/api/src/index.ts` |
+| D1 スキーマ SQL | `apps/api/migrations/0001_initial.sql` |
+| 依存関係とスクリプト | `package.json` |
 
-## Features
+## 主な機能
 
-- First setup creates the super admin with `ADMIN_SETUP_SECRET`.
-- Self-use mode disables email verification by default. Multi-user mode enables it by default.
-- New API keys use `oi-only-`. Older generated keys are still accepted.
-- `/v1/models` returns enabled model names from Model Square.
-- Model Square supports editing display names, copying, and hiding models.
-- Each channel has its own test button. Testing also syncs upstream `/models`.
-- Usage table includes 3 hours, 1 day, 7 days, 15 days, and all-time.
-- Telegram and WxPusher test messages are available in system settings.
+- 初回セットアップでは `ADMIN_SETUP_SECRET` を使ってスーパー管理者を作成します。
+- 個人利用モードではメール確認が既定で無効、複数ユーザーモードでは既定で有効です。
+- 新しい API Key は `oi-only-` を使用します。以前に作成された Key も引き続き使えます。
+- `/v1/models` はモデル広場で有効になっているモデル名を返します。
+- モデル広場では表示名の編集、コピー、非表示ができます。
+- 各チャンネルには個別のテストボタンがあり、テスト時に上流の `/models` を同期します。
+- 利用統計は 3 時間、1 日、7 日、15 日、全期間を表示します。
+- システム設定から Telegram と WxPusher のテスト通知を送れます。
 
-## Deploy 1: Worker Backend
+## デプロイ 1: Worker バックエンド
 
-Create a Worker in Cloudflare Workers & Pages and connect this GitHub repository.
+Cloudflare Workers & Pages で Worker を作成し、この GitHub リポジトリを接続します。
 
-| Setting | Value |
+| 設定 | 値 |
 | --- | --- |
-| Root directory | blank or `/` |
-| Build command | `npm ci` |
-| Deploy command | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
+| ルートディレクトリ | 空欄または `/` |
+| ビルドコマンド | `npm ci` |
+| デプロイコマンド | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
 
-This project does not need `wrangler.toml`.
+このプロジェクトでは `wrangler.toml` は不要です。
 
-## Deploy 2: D1 Database
+## デプロイ 2: D1 データベース
 
-Create a D1 database. Recommended name:
+D1 データベースを作成します。新規作成時の推奨名:
 
 ```txt
 only_api
 ```
 
-If you already use a different D1 database name, you can keep it. The required Worker binding name is:
+別の D1 データベース名を使っていても問題ありません。Worker のバインド名だけは次の名前にしてください。
 
 ```txt
 DB
 ```
 
-Open the D1 console and run all SQL from:
+D1 コンソールで次の SQL ファイルの内容をすべて実行します。
 
 ```txt
 apps/api/migrations/0001_initial.sql
 ```
 
-Tables:
+作成されるテーブル:
 
-| Table | Purpose |
+| テーブル | 用途 |
 | --- | --- |
-| `users` | users and admins |
-| `email_verifications` | email verification tokens |
-| `sessions` | login sessions |
-| `api_keys` | user API keys |
-| `channels` | upstream channels |
-| `model_catalog` | Model Square data |
-| `usage_logs` | request usage logs |
-| `worker_usage_snapshots` | Workers usage snapshots |
-| `system_settings` | system settings |
+| `users` | ユーザーと管理者 |
+| `email_verifications` | メール確認トークン |
+| `sessions` | ログインセッション |
+| `api_keys` | ユーザー API Key |
+| `channels` | 上流チャンネル |
+| `model_catalog` | モデル広場 |
+| `usage_logs` | リクエスト利用ログ |
+| `worker_usage_snapshots` | Workers 使用量スナップショット |
+| `system_settings` | システム設定 |
 
-## Deploy 3: Worker Bindings and Variables
+## デプロイ 3: Worker のバインドと変数
 
-Bind D1 in Worker settings:
+Worker 設定で D1 をバインドします。
 
-| Type | Name | Value |
+| 種類 | 名前 | 値 |
 | --- | --- | --- |
-| D1 database | `DB` | your D1 database |
+| D1 データベース | `DB` | 作成した D1 データベース |
 
-Required:
+必須変数:
 
-| Name | Type | Notes |
+| 名前 | 種類 | 説明 |
 | --- | --- | --- |
-| `APP_ORIGIN` | Variable | Pages frontend URL |
-| `ADMIN_SETUP_SECRET` | Secret | first setup password |
-| `JWT_SECRET` | Secret | long random string |
+| `APP_ORIGIN` | Variable | Pages フロントエンドの URL |
+| `ADMIN_SETUP_SECRET` | Secret | 初回セットアップ用の管理者キー |
+| `JWT_SECRET` | Secret | 長いランダム文字列 |
 
-Recommended:
+推奨変数:
 
-| Name | Type | Notes |
+| 名前 | 種類 | 説明 |
 | --- | --- | --- |
-| `API_PUBLIC_BASE_URL` | Variable | public Worker URL shown in frontend |
+| `API_PUBLIC_BASE_URL` | Variable | フロントエンドに表示する公開 Worker URL |
 
-Optional:
+任意変数:
 
-| Name | Type | Notes |
+| 名前 | 種類 | 説明 |
 | --- | --- | --- |
-| `RESEND_API_KEY` | Secret | Resend API key |
-| `RESEND_FROM` | Variable | email sender |
-| `TURNSTILE_SECRET_KEY` | Secret | Turnstile secret |
-| `CF_ACCOUNT_ID` | Variable | Cloudflare account ID |
-| `CF_API_TOKEN` | Secret | token for Workers usage |
+| `RESEND_API_KEY` | Secret | Resend API Key |
+| `RESEND_FROM` | Variable | メール送信元 |
+| `TURNSTILE_SECRET_KEY` | Secret | Turnstile Secret Key |
+| `CF_ACCOUNT_ID` | Variable | Cloudflare アカウント ID |
+| `CF_API_TOKEN` | Secret | Workers 使用量を読むための Token |
 
-Notification required variables:
+通知に必要な変数:
 
-| Name | Type | Notes |
+| 名前 | 種類 | 説明 |
 | --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | Secret | Telegram bot token |
-| `TELEGRAM_CHAT_ID` | Variable | Telegram chat ID |
+| `TELEGRAM_BOT_TOKEN` | Secret | Telegram ボット Token |
+| `TELEGRAM_CHAT_ID` | Variable | Telegram チャットまたはグループ ID |
 | `WXPUSHER_APP_TOKEN` | Secret | WxPusher AppToken |
-| `WXPUSHER_UIDS` | Variable | comma-separated WxPusher UIDs; required unless `WXPUSHER_TOPIC_IDS` is set |
-| `WXPUSHER_TOPIC_IDS` | Variable | comma-separated WxPusher topic IDs; required unless `WXPUSHER_UIDS` is set |
+| `WXPUSHER_UIDS` | Variable | WxPusher UID。`WXPUSHER_TOPIC_IDS` を使わない場合は必須 |
+| `WXPUSHER_TOPIC_IDS` | Variable | WxPusher Topic ID。`WXPUSHER_UIDS` を使わない場合は必須 |
 
-## Deploy 4: Pages Frontend
+## デプロイ 4: Pages フロントエンド
 
-Create a Cloudflare Pages project from the same GitHub repository.
+同じ GitHub リポジトリから Cloudflare Pages プロジェクトを作成します。
 
-| Setting | Value |
+| 設定 | 値 |
 | --- | --- |
-| Framework preset | `React (Vite)` |
-| Root directory | blank or `/` |
-| Build command | `npm ci && npm run build:web` |
-| Build output directory | `apps/web/dist` |
-| Node.js version | `20` or newer |
+| フレームワークプリセット | `React (Vite)` |
+| ルートディレクトリ | 空欄または `/` |
+| ビルドコマンド | `npm ci && npm run build:web` |
+| ビルド出力ディレクトリ | `apps/web/dist` |
+| Node.js バージョン | `20` 以上 |
 
-Required Pages variable:
+Pages に必要な環境変数:
 
 ```txt
 VITE_API_BASE_URL=https://your-worker-domain
 ```
 
-After Pages is deployed, set Worker variable `APP_ORIGIN` to the Pages URL.
+Pages のデプロイ後、Worker 変数 `APP_ORIGIN` を Pages の URL に設定します。
 
-## First Setup and API Usage
+## 初回セットアップと API 利用
 
-Open the Pages URL, enter `ADMIN_SETUP_SECRET`, email, password, site name, and choose self-use or multi-user mode.
+Pages の URL を開き、`ADMIN_SETUP_SECRET`、メール、パスワード、サイト名、個人利用または複数ユーザーモードを入力します。
 
-Client Base URL:
+クライアント Base URL:
 
 ```txt
 https://your-worker-domain/v1
 ```
 
-Header:
+認証ヘッダー:
 
 ```http
 Authorization: Bearer oi-only-...
 ```
 
-SillyTavern:
+SillyTavern 推奨設定:
 
 ```txt
 API type: OpenAI Compatible / Custom OpenAI-compatible
 API Base URL: https://your-worker-domain/v1
-API Key: full oi-only-... key
-Model: copy from Model Square
+API Key: 完全な oi-only-... key
+Model: モデル広場からコピー
 ```
 
-Channel Base URL examples:
+チャンネル Base URL の例:
 
-| Provider | Base URL |
+| 提供元 | Base URL |
 | --- | --- |
 | OpenAI | `https://api.openai.com/v1` |
 | OpenRouter | `https://openrouter.ai/api/v1` |
 
-## Advanced Optional Push Variables
+## 高度な任意プッシュ変数
 
-These variables are not required for normal deployment. They are for users who already understand Telegram topics, message formatting, link previews, or WxPusher paid-topic behavior.
+通常のデプロイでは不要です。Telegram のトピック、メッセージ形式、リンクプレビュー、または WxPusher の有料トピック動作を理解している利用者向けです。
 
-| Name | Type | Notes |
+| 名前 | 種類 | 説明 |
 | --- | --- | --- |
-| `TELEGRAM_PARSE_MODE` | Variable | `HTML`, `MarkdownV2`, or `Markdown` |
-| `TELEGRAM_MESSAGE_THREAD_ID` | Variable | Telegram forum topic thread ID |
-| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Variable | Telegram direct messages topic ID |
-| `TELEGRAM_DISABLE_NOTIFICATION` | Variable | boolean, silent notification |
-| `TELEGRAM_PROTECT_CONTENT` | Variable | boolean, protect content |
-| `TELEGRAM_LINK_PREVIEW_DISABLED` | Variable | boolean, disable link previews |
-| `WXPUSHER_URL` | Variable | message link |
-| `WXPUSHER_CONTENT_TYPE` | Variable | `1` text, `2` HTML, `3` Markdown; default `1` |
-| `WXPUSHER_VERIFY_PAY_TYPE` | Variable | `0` no check, `1` paid users, `2` unpaid/expired users |
+| `TELEGRAM_PARSE_MODE` | Variable | `HTML`、`MarkdownV2`、`Markdown` |
+| `TELEGRAM_MESSAGE_THREAD_ID` | Variable | Telegram フォーラムトピックの Thread ID |
+| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Variable | Telegram Direct Messages Topic ID |
+| `TELEGRAM_DISABLE_NOTIFICATION` | Variable | 真偽値、サイレント通知 |
+| `TELEGRAM_PROTECT_CONTENT` | Variable | 真偽値、転送や保存から内容を保護 |
+| `TELEGRAM_LINK_PREVIEW_DISABLED` | Variable | 真偽値、リンクプレビューを無効化 |
+| `WXPUSHER_URL` | Variable | メッセージに付けるリンク |
+| `WXPUSHER_CONTENT_TYPE` | Variable | `1` テキスト、`2` HTML、`3` Markdown。既定値は `1` |
+| `WXPUSHER_VERIFY_PAY_TYPE` | Variable | `0` 確認しない、`1` 有料ユーザーのみ、`2` 未購読または期限切れユーザーのみ |
 
 このリポジトリは無期限にメンテナンスされません。

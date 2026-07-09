@@ -1,183 +1,183 @@
 # Only API
 
-Το Only API είναι ένα OpenAI-compatible API gateway για Cloudflare Workers και Pages. Περιλαμβάνει login, εγγραφή, email verification, API keys, channel management, Model Square, usage statistics, Workers usage checks και προαιρετικές ειδοποιήσεις Telegram / WxPusher.
+Το Only API είναι ένα OpenAI-compatible API gateway για Cloudflare Workers και Pages. Περιλαμβάνει σύνδεση, εγγραφή, επαλήθευση email, API Keys, διαχείριση καναλιών, πλατεία μοντέλων, στατιστικά χρήσης, έλεγχο χρήσης Workers και προαιρετικές ειδοποιήσεις Telegram / WxPusher.
 
-Default English README: [README.md](README.md). Άλλες γλώσσες: [中文](readme-zh.md) | [日本語](readme-ja.md) | [Deutsch](readme-de.md) | [Русский](readme-ru.md) | [العربية](readme-ar.md)
+Το προεπιλεγμένο αγγλικό README είναι το [README.md](README.md). Άλλες γλώσσες: [κινεζικά](readme-zh.md) | [ιαπωνικά](readme-ja.md) | [γερμανικά](readme-de.md) | [ρωσικά](readme-ru.md) | [αραβικά](readme-ar.md)
 
-## Project Paths
+## Δομή έργου
 
-| Purpose | Path |
+| Σκοπός | Διαδρομή |
 | --- | --- |
-| Pages frontend | `apps/web` |
-| Worker backend | `apps/api/src/index.ts` |
-| D1 schema SQL | `apps/api/migrations/0001_initial.sql` |
-| Dependencies | `package.json` |
+| Frontend Pages | `apps/web` |
+| Backend Worker | `apps/api/src/index.ts` |
+| SQL σχήμα D1 | `apps/api/migrations/0001_initial.sql` |
+| Εξαρτήσεις και scripts | `package.json` |
 
-## Features
+## Χαρακτηριστικά
 
-- First setup creates the super admin with `ADMIN_SETUP_SECRET`.
-- Self-use mode disables email verification by default. Multi-user mode enables it by default.
-- New API keys use `oi-only-`. Older generated keys still work.
-- `/v1/models` returns enabled model names from Model Square.
-- Model Square supports custom display names, copy, and hide.
-- Each channel has an individual test button. Tests sync upstream `/models`.
-- Usage statistics show 3 hours, 1 day, 7 days, 15 days, and all-time.
-- Telegram and WxPusher test messages are available in system settings.
+- Η πρώτη ρύθμιση δημιουργεί υπερδιαχειριστή με `ADMIN_SETUP_SECRET`.
+- Στη λειτουργία προσωπικής χρήσης η επαλήθευση email είναι απενεργοποιημένη από προεπιλογή. Στη λειτουργία πολλών χρηστών είναι ενεργοποιημένη από προεπιλογή.
+- Τα νέα API Keys χρησιμοποιούν `oi-only-`. Τα παλαιότερα κλειδιά που έχουν ήδη δημιουργηθεί παραμένουν έγκυρα.
+- Το `/v1/models` επιστρέφει τα ενεργά ονόματα μοντέλων από την πλατεία μοντέλων.
+- Η πλατεία μοντέλων υποστηρίζει αλλαγή εμφανιζόμενου ονόματος, αντιγραφή και απόκρυψη.
+- Κάθε κανάλι έχει ξεχωριστό κουμπί δοκιμής. Η δοκιμή συγχρονίζει τα upstream `/models`.
+- Τα στατιστικά χρήσης εμφανίζουν 3 ώρες, 1 ημέρα, 7 ημέρες, 15 ημέρες και συνολικά δεδομένα.
+- Οι ρυθμίσεις συστήματος υποστηρίζουν δοκιμαστικά μηνύματα Telegram και WxPusher.
 
-## Deployment 1: Worker Backend
+## Ανάπτυξη 1: Backend Worker
 
-Create a Worker in Cloudflare Workers & Pages and connect your GitHub repository.
+Δημιούργησε Worker στο Cloudflare Workers & Pages και σύνδεσε αυτό το GitHub repository.
 
-| Setting | Value |
+| Ρύθμιση | Τιμή |
 | --- | --- |
-| Root directory | blank or `/` |
+| Root directory | κενό ή `/` |
 | Build command | `npm ci` |
-| Deploy command | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
+| Εντολή ανάπτυξης | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
 
-This project does not require `wrangler.toml`.
+Το έργο δεν χρειάζεται `wrangler.toml`.
 
-## Deployment 2: D1 Database
+## Ανάπτυξη 2: Βάση D1
 
-Create a D1 database. Recommended name:
+Δημιούργησε βάση D1. Προτεινόμενο όνομα για νέα εγκατάσταση:
 
 ```txt
 only_api
 ```
 
-If you already use a different D1 database name, you can keep it. The required Worker binding name is:
+Μπορείς να χρησιμοποιήσεις και άλλο όνομα βάσης D1. Το σημαντικό είναι το binding του Worker να ονομάζεται:
 
 ```txt
 DB
 ```
 
-Run all SQL from:
+Στην κονσόλα D1 εκτέλεσε όλο το SQL από το αρχείο:
 
 ```txt
 apps/api/migrations/0001_initial.sql
 ```
 
-Tables:
+Πίνακες που δημιουργούνται:
 
-| Table | Purpose |
+| Πίνακας | Σκοπός |
 | --- | --- |
-| `users` | users and admins |
-| `email_verifications` | email verification tokens |
-| `sessions` | login sessions |
-| `api_keys` | user API keys |
-| `channels` | upstream channels |
-| `model_catalog` | Model Square |
-| `usage_logs` | request usage logs |
-| `worker_usage_snapshots` | Workers usage snapshots |
-| `system_settings` | system settings |
+| `users` | χρήστες και διαχειριστές |
+| `email_verifications` | tokens επαλήθευσης email |
+| `sessions` | συνεδρίες σύνδεσης |
+| `api_keys` | API Keys χρηστών |
+| `channels` | upstream κανάλια |
+| `model_catalog` | πλατεία μοντέλων |
+| `usage_logs` | αρχεία χρήσης αιτημάτων |
+| `worker_usage_snapshots` | στιγμιότυπα χρήσης Workers |
+| `system_settings` | ρυθμίσεις συστήματος |
 
-## Deployment 3: Worker Variables
+## Ανάπτυξη 3: Bindings και μεταβλητές Worker
 
-Bind D1:
+Στις ρυθμίσεις Worker σύνδεσε τη βάση D1.
 
-| Type | Name | Value |
+| Τύπος | Όνομα | Τιμή |
 | --- | --- | --- |
-| D1 database | `DB` | your D1 database |
+| D1 database | `DB` | η βάση D1 σου |
 
-Required:
+Υποχρεωτικές μεταβλητές:
 
-| Name | Type | Notes |
+| Όνομα | Τύπος | Σημείωση |
 | --- | --- | --- |
-| `APP_ORIGIN` | Variable | Pages frontend URL |
-| `ADMIN_SETUP_SECRET` | Secret | first setup password |
-| `JWT_SECRET` | Secret | long random string |
+| `APP_ORIGIN` | Variable | URL του frontend Pages |
+| `ADMIN_SETUP_SECRET` | Secret | κλειδί διαχειριστή για την πρώτη ρύθμιση |
+| `JWT_SECRET` | Secret | μεγάλη τυχαία συμβολοσειρά |
 
-Recommended:
+Προτεινόμενη μεταβλητή:
 
-| Name | Type | Notes |
+| Όνομα | Τύπος | Σημείωση |
 | --- | --- | --- |
-| `API_PUBLIC_BASE_URL` | Variable | public Worker URL shown in frontend |
+| `API_PUBLIC_BASE_URL` | Variable | δημόσιο Worker URL που εμφανίζεται στο frontend |
 
-Optional:
+Προαιρετικές μεταβλητές:
 
-| Name | Type | Notes |
+| Όνομα | Τύπος | Σημείωση |
 | --- | --- | --- |
-| `RESEND_API_KEY` | Secret | Resend API key |
-| `RESEND_FROM` | Variable | email sender |
-| `TURNSTILE_SECRET_KEY` | Secret | Turnstile secret |
-| `CF_ACCOUNT_ID` | Variable | Cloudflare account ID |
-| `CF_API_TOKEN` | Secret | Workers usage token |
+| `RESEND_API_KEY` | Secret | Resend API Key |
+| `RESEND_FROM` | Variable | αποστολέας email |
+| `TURNSTILE_SECRET_KEY` | Secret | Turnstile Secret Key |
+| `CF_ACCOUNT_ID` | Variable | Cloudflare Account ID |
+| `CF_API_TOKEN` | Secret | Token για ανάγνωση χρήσης Workers |
 
-Notification required variables:
+Μεταβλητές που απαιτούνται για ειδοποιήσεις:
 
-| Name | Type | Notes |
+| Όνομα | Τύπος | Σημείωση |
 | --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | Secret | Telegram bot token |
-| `TELEGRAM_CHAT_ID` | Variable | Telegram chat ID |
+| `TELEGRAM_BOT_TOKEN` | Secret | Telegram Bot Token |
+| `TELEGRAM_CHAT_ID` | Variable | Telegram chat ή group ID |
 | `WXPUSHER_APP_TOKEN` | Secret | WxPusher AppToken |
-| `WXPUSHER_UIDS` | Variable | comma-separated WxPusher UIDs; required unless `WXPUSHER_TOPIC_IDS` is set |
-| `WXPUSHER_TOPIC_IDS` | Variable | comma-separated WxPusher topic IDs; required unless `WXPUSHER_UIDS` is set |
+| `WXPUSHER_UIDS` | Variable | WxPusher UIDs. Απαιτείται αν δεν οριστεί `WXPUSHER_TOPIC_IDS` |
+| `WXPUSHER_TOPIC_IDS` | Variable | WxPusher Topic IDs. Απαιτείται αν δεν οριστεί `WXPUSHER_UIDS` |
 
-## Deployment 4: Pages Frontend
+## Ανάπτυξη 4: Frontend Pages
 
-Create a Pages project from the same GitHub repository.
+Δημιούργησε Cloudflare Pages project από το ίδιο GitHub repository.
 
-| Setting | Value |
+| Ρύθμιση | Τιμή |
 | --- | --- |
 | Framework preset | `React (Vite)` |
-| Root directory | blank or `/` |
+| Root directory | κενό ή `/` |
 | Build command | `npm ci && npm run build:web` |
 | Build output directory | `apps/web/dist` |
-| Node.js version | `20` or newer |
+| Έκδοση Node.js | `20` ή νεότερη |
 
-Required Pages variable:
+Υποχρεωτική μεταβλητή Pages:
 
 ```txt
 VITE_API_BASE_URL=https://your-worker-domain
 ```
 
-After Pages is deployed, set Worker variable `APP_ORIGIN` to the Pages URL.
+Μετά την ανάπτυξη του Pages, όρισε τη μεταβλητή Worker `APP_ORIGIN` στο URL του Pages.
 
-## First Setup and API Usage
+## Πρώτη ρύθμιση και χρήση API
 
-Open the Pages URL and create the super admin with `ADMIN_SETUP_SECRET`.
+Άνοιξε το URL του Pages και συμπλήρωσε `ADMIN_SETUP_SECRET`, email, κωδικό, όνομα site και λειτουργία προσωπικής χρήσης ή πολλών χρηστών.
 
-Client Base URL:
+Βασικό URL πελάτη:
 
 ```txt
 https://your-worker-domain/v1
 ```
 
-Header:
+Κεφαλίδα:
 
 ```http
 Authorization: Bearer oi-only-...
 ```
 
-SillyTavern:
+Προτεινόμενες ρυθμίσεις SillyTavern:
 
 ```txt
 API type: OpenAI Compatible / Custom OpenAI-compatible
 API Base URL: https://your-worker-domain/v1
-API Key: full oi-only-... key
-Model: copy from Model Square
+API Key: πλήρες oi-only-... key
+Model: αντιγραφή από την πλατεία μοντέλων
 ```
 
-Channel Base URL examples:
+Παραδείγματα Channel Base URL:
 
-| Provider | Base URL |
+| Πάροχος | Base URL |
 | --- | --- |
 | OpenAI | `https://api.openai.com/v1` |
 | OpenRouter | `https://openrouter.ai/api/v1` |
 
-## Advanced Optional Push Variables
+## Προχωρημένες προαιρετικές μεταβλητές push
 
-These variables are not required for normal deployment. They are for users who already understand Telegram topics, message formatting, link previews, or WxPusher paid-topic behavior.
+Αυτές οι μεταβλητές δεν απαιτούνται για κανονική ανάπτυξη. Απευθύνονται σε χρήστες που γνωρίζουν Telegram topics, μορφοποίηση μηνυμάτων, προεπισκόπηση συνδέσμων ή τη συμπεριφορά πληρωμένων topics στο WxPusher.
 
-| Name | Type | Notes |
+| Όνομα | Τύπος | Σημείωση |
 | --- | --- | --- |
-| `TELEGRAM_PARSE_MODE` | Variable | `HTML`, `MarkdownV2`, or `Markdown` |
-| `TELEGRAM_MESSAGE_THREAD_ID` | Variable | Telegram forum topic thread ID |
-| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Variable | Telegram direct messages topic ID |
-| `TELEGRAM_DISABLE_NOTIFICATION` | Variable | boolean, silent notification |
-| `TELEGRAM_PROTECT_CONTENT` | Variable | boolean, protect content |
-| `TELEGRAM_LINK_PREVIEW_DISABLED` | Variable | boolean, disable link previews |
-| `WXPUSHER_URL` | Variable | message link |
-| `WXPUSHER_CONTENT_TYPE` | Variable | `1` text, `2` HTML, `3` Markdown; default `1` |
-| `WXPUSHER_VERIFY_PAY_TYPE` | Variable | `0` no check, `1` paid users, `2` unpaid/expired users |
+| `TELEGRAM_PARSE_MODE` | Variable | `HTML`, `MarkdownV2` ή `Markdown` |
+| `TELEGRAM_MESSAGE_THREAD_ID` | Variable | Thread ID για Telegram forum topic |
+| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Variable | Telegram Direct Messages Topic ID |
+| `TELEGRAM_DISABLE_NOTIFICATION` | Variable | boolean, αθόρυβη ειδοποίηση |
+| `TELEGRAM_PROTECT_CONTENT` | Variable | boolean, προστασία περιεχομένου από προώθηση ή αποθήκευση |
+| `TELEGRAM_LINK_PREVIEW_DISABLED` | Variable | boolean, απενεργοποίηση προεπισκόπησης συνδέσμων |
+| `WXPUSHER_URL` | Variable | σύνδεσμος μέσα στο μήνυμα |
+| `WXPUSHER_CONTENT_TYPE` | Variable | `1` κείμενο, `2` HTML, `3` Markdown. Προεπιλογή `1` |
+| `WXPUSHER_VERIFY_PAY_TYPE` | Variable | `0` χωρίς έλεγχο, `1` μόνο πληρωμένοι χρήστες, `2` μη συνδρομητές ή ληγμένοι χρήστες |
 
 Αυτό το αποθετήριο δεν θα συντηρείται επ' αόριστον.

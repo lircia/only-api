@@ -1,183 +1,183 @@
 # Only API
 
-Only API - это OpenAI-compatible API gateway для Cloudflare Workers и Pages. Проект включает вход, регистрацию, проверку email, API keys, управление каналами, Model Square, статистику использования, проверку Workers usage и опциональные уведомления Telegram / WxPusher.
+Only API - это OpenAI-совместимый API-шлюз для Cloudflare Workers и Pages. Проект включает вход, регистрацию, проверку электронной почты, API Keys, управление каналами, витрину моделей, статистику использования, проверку использования Workers и необязательные уведомления Telegram / WxPusher.
 
-Default English README: [README.md](README.md). Другие языки: [中文](readme-zh.md) | [日本語](readme-ja.md) | [Deutsch](readme-de.md) | [العربية](readme-ar.md) | [Ελληνικά](readme-el.md)
+Основная английская документация находится в [README.md](README.md). Другие языки: [китайский](readme-zh.md) | [японский](readme-ja.md) | [немецкий](readme-de.md) | [арабский](readme-ar.md) | [греческий](readme-el.md)
 
-## Project Paths
+## Структура проекта
 
-| Purpose | Path |
+| Назначение | Путь |
 | --- | --- |
-| Pages frontend | `apps/web` |
-| Worker backend | `apps/api/src/index.ts` |
-| D1 schema SQL | `apps/api/migrations/0001_initial.sql` |
-| Dependencies | `package.json` |
+| Фронтенд Pages | `apps/web` |
+| Бэкенд Worker | `apps/api/src/index.ts` |
+| SQL-схема D1 | `apps/api/migrations/0001_initial.sql` |
+| Зависимости и скрипты | `package.json` |
 
-## Features
+## Возможности
 
-- First setup creates the super admin with `ADMIN_SETUP_SECRET`.
-- Self-use mode disables email verification by default. Multi-user mode enables it by default.
-- New API keys use `oi-only-`. Older generated keys still work.
-- `/v1/models` returns enabled model names from Model Square.
-- Model Square supports custom display names, copy, and hide.
-- Each channel has an individual test button. Tests sync upstream `/models`.
-- Usage statistics show 3 hours, 1 day, 7 days, 15 days, and all-time.
-- Telegram and WxPusher test messages are available in system settings.
+- Первичная настройка создает супер-администратора с помощью `ADMIN_SETUP_SECRET`.
+- В режиме личного использования проверка email по умолчанию выключена. В многопользовательском режиме она включена по умолчанию.
+- Новые API Keys используют префикс `oi-only-`. Ранее созданные ключи продолжают работать.
+- `/v1/models` возвращает включенные имена моделей из витрины моделей.
+- В витрине моделей можно менять отображаемые имена, копировать и скрывать модели.
+- У каждого канала есть отдельная кнопка теста. При тесте синхронизируется upstream `/models`.
+- Статистика показывает 3 часа, 1 день, 7 дней, 15 дней и общий итог.
+- В системных настройках можно отправить тестовые уведомления Telegram и WxPusher.
 
-## Deployment 1: Worker Backend
+## Развертывание 1: бэкенд Worker
 
-Create a Worker in Cloudflare Workers & Pages and connect your GitHub repository.
+Создайте Worker в Cloudflare Workers & Pages и подключите этот GitHub-репозиторий.
 
-| Setting | Value |
+| Настройка | Значение |
 | --- | --- |
-| Root directory | blank or `/` |
-| Build command | `npm ci` |
-| Deploy command | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
+| Корневой каталог | пусто или `/` |
+| Команда сборки | `npm ci` |
+| Команда развертывания | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
 
-The project does not require `wrangler.toml`.
+Файл `wrangler.toml` для этого проекта не нужен.
 
-## Deployment 2: D1 Database
+## Развертывание 2: база данных D1
 
-Create a D1 database. Recommended name:
+Создайте базу данных D1. Рекомендуемое имя для новой установки:
 
 ```txt
 only_api
 ```
 
-If you already use a different D1 database name, you can keep it. The required Worker binding name is:
+Можно использовать и другое имя базы D1. Важно, чтобы привязка Worker называлась:
 
 ```txt
 DB
 ```
 
-Run all SQL from:
+В консоли D1 выполните весь SQL из файла:
 
 ```txt
 apps/api/migrations/0001_initial.sql
 ```
 
-Tables:
+Будут созданы таблицы:
 
-| Table | Purpose |
+| Таблица | Назначение |
 | --- | --- |
-| `users` | users and admins |
-| `email_verifications` | email verification tokens |
-| `sessions` | login sessions |
-| `api_keys` | user API keys |
-| `channels` | upstream channels |
-| `model_catalog` | Model Square |
-| `usage_logs` | request usage logs |
-| `worker_usage_snapshots` | Workers usage snapshots |
-| `system_settings` | system settings |
+| `users` | пользователи и администраторы |
+| `email_verifications` | токены проверки email |
+| `sessions` | сеансы входа |
+| `api_keys` | API Keys пользователей |
+| `channels` | upstream-каналы |
+| `model_catalog` | витрина моделей |
+| `usage_logs` | журналы использования запросов |
+| `worker_usage_snapshots` | снимки использования Workers |
+| `system_settings` | системные настройки |
 
-## Deployment 3: Worker Variables
+## Развертывание 3: привязки и переменные Worker
 
-Bind D1:
+Привяжите D1 в настройках Worker.
 
-| Type | Name | Value |
+| Тип | Имя | Значение |
 | --- | --- | --- |
-| D1 database | `DB` | your D1 database |
+| D1 database | `DB` | ваша база D1 |
 
-Required:
+Обязательные переменные:
 
-| Name | Type | Notes |
+| Имя | Тип | Примечание |
 | --- | --- | --- |
-| `APP_ORIGIN` | Variable | Pages frontend URL |
-| `ADMIN_SETUP_SECRET` | Secret | first setup password |
-| `JWT_SECRET` | Secret | long random string |
+| `APP_ORIGIN` | Variable | URL фронтенда Pages |
+| `ADMIN_SETUP_SECRET` | Secret | ключ администратора для первичной настройки |
+| `JWT_SECRET` | Secret | длинная случайная строка |
 
-Recommended:
+Рекомендуемая переменная:
 
-| Name | Type | Notes |
+| Имя | Тип | Примечание |
 | --- | --- | --- |
-| `API_PUBLIC_BASE_URL` | Variable | public Worker URL shown in frontend |
+| `API_PUBLIC_BASE_URL` | Variable | публичный URL Worker, показываемый во фронтенде |
 
-Optional:
+Необязательные переменные:
 
-| Name | Type | Notes |
+| Имя | Тип | Примечание |
 | --- | --- | --- |
-| `RESEND_API_KEY` | Secret | Resend API key |
-| `RESEND_FROM` | Variable | email sender |
-| `TURNSTILE_SECRET_KEY` | Secret | Turnstile secret |
-| `CF_ACCOUNT_ID` | Variable | Cloudflare account ID |
-| `CF_API_TOKEN` | Secret | Workers usage token |
+| `RESEND_API_KEY` | Secret | Resend API Key |
+| `RESEND_FROM` | Variable | отправитель email |
+| `TURNSTILE_SECRET_KEY` | Secret | Turnstile Secret Key |
+| `CF_ACCOUNT_ID` | Variable | идентификатор аккаунта Cloudflare |
+| `CF_API_TOKEN` | Secret | Token для чтения использования Workers |
 
-Notification required variables:
+Переменные, необходимые для уведомлений:
 
-| Name | Type | Notes |
+| Имя | Тип | Примечание |
 | --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | Secret | Telegram bot token |
-| `TELEGRAM_CHAT_ID` | Variable | Telegram chat ID |
+| `TELEGRAM_BOT_TOKEN` | Secret | Telegram Bot Token |
+| `TELEGRAM_CHAT_ID` | Variable | ID чата или группы Telegram |
 | `WXPUSHER_APP_TOKEN` | Secret | WxPusher AppToken |
-| `WXPUSHER_UIDS` | Variable | comma-separated WxPusher UIDs; required unless `WXPUSHER_TOPIC_IDS` is set |
-| `WXPUSHER_TOPIC_IDS` | Variable | comma-separated WxPusher topic IDs; required unless `WXPUSHER_UIDS` is set |
+| `WXPUSHER_UIDS` | Variable | WxPusher UIDs; обязательно, если не задан `WXPUSHER_TOPIC_IDS` |
+| `WXPUSHER_TOPIC_IDS` | Variable | WxPusher Topic IDs; обязательно, если не задан `WXPUSHER_UIDS` |
 
-## Deployment 4: Pages Frontend
+## Развертывание 4: фронтенд Pages
 
-Create a Pages project from the same GitHub repository.
+Создайте проект Cloudflare Pages из того же GitHub-репозитория.
 
-| Setting | Value |
+| Настройка | Значение |
 | --- | --- |
-| Framework preset | `React (Vite)` |
-| Root directory | blank or `/` |
-| Build command | `npm ci && npm run build:web` |
-| Build output directory | `apps/web/dist` |
-| Node.js version | `20` or newer |
+| Пресет фреймворка | `React (Vite)` |
+| Корневой каталог | пусто или `/` |
+| Команда сборки | `npm ci && npm run build:web` |
+| Каталог результата сборки | `apps/web/dist` |
+| Версия Node.js | `20` или выше |
 
-Required Pages variable:
+Обязательная переменная Pages:
 
 ```txt
 VITE_API_BASE_URL=https://your-worker-domain
 ```
 
-After Pages is deployed, set Worker variable `APP_ORIGIN` to the Pages URL.
+После развертывания Pages установите переменную Worker `APP_ORIGIN` в URL Pages.
 
-## First Setup and API Usage
+## Первичная настройка и использование API
 
-Open the Pages URL and create the super admin with `ADMIN_SETUP_SECRET`.
+Откройте URL Pages и введите `ADMIN_SETUP_SECRET`, email, пароль, название сайта, а также выберите личный или многопользовательский режим.
 
-Client Base URL:
+Базовый URL клиента:
 
 ```txt
 https://your-worker-domain/v1
 ```
 
-Header:
+Заголовок:
 
 ```http
 Authorization: Bearer oi-only-...
 ```
 
-SillyTavern:
+Рекомендуемые настройки SillyTavern:
 
 ```txt
 API type: OpenAI Compatible / Custom OpenAI-compatible
 API Base URL: https://your-worker-domain/v1
-API Key: full oi-only-... key
-Model: copy from Model Square
+API Key: полный oi-only-... key
+Model: скопировать из витрины моделей
 ```
 
-Channel Base URL examples:
+Примеры Base URL каналов:
 
-| Provider | Base URL |
+| Провайдер | Base URL |
 | --- | --- |
 | OpenAI | `https://api.openai.com/v1` |
 | OpenRouter | `https://openrouter.ai/api/v1` |
 
-## Advanced Optional Push Variables
+## Расширенные необязательные переменные push-уведомлений
 
-These variables are not required for normal deployment. They are for users who already understand Telegram topics, message formatting, link previews, or WxPusher paid-topic behavior.
+Эти переменные не нужны для обычного развертывания. Они предназначены для пользователей, которые понимают темы Telegram, форматирование сообщений, предпросмотр ссылок или поведение платных тем WxPusher.
 
-| Name | Type | Notes |
+| Имя | Тип | Примечание |
 | --- | --- | --- |
-| `TELEGRAM_PARSE_MODE` | Variable | `HTML`, `MarkdownV2`, or `Markdown` |
-| `TELEGRAM_MESSAGE_THREAD_ID` | Variable | Telegram forum topic thread ID |
-| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Variable | Telegram direct messages topic ID |
-| `TELEGRAM_DISABLE_NOTIFICATION` | Variable | boolean, silent notification |
-| `TELEGRAM_PROTECT_CONTENT` | Variable | boolean, protect content |
-| `TELEGRAM_LINK_PREVIEW_DISABLED` | Variable | boolean, disable link previews |
-| `WXPUSHER_URL` | Variable | message link |
-| `WXPUSHER_CONTENT_TYPE` | Variable | `1` text, `2` HTML, `3` Markdown; default `1` |
-| `WXPUSHER_VERIFY_PAY_TYPE` | Variable | `0` no check, `1` paid users, `2` unpaid/expired users |
+| `TELEGRAM_PARSE_MODE` | Variable | `HTML`, `MarkdownV2` или `Markdown` |
+| `TELEGRAM_MESSAGE_THREAD_ID` | Variable | Thread ID темы форума Telegram |
+| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Variable | Telegram Direct Messages Topic ID |
+| `TELEGRAM_DISABLE_NOTIFICATION` | Variable | логическое значение, тихое уведомление |
+| `TELEGRAM_PROTECT_CONTENT` | Variable | логическое значение, защита от пересылки или сохранения |
+| `TELEGRAM_LINK_PREVIEW_DISABLED` | Variable | логическое значение, отключить предпросмотр ссылок |
+| `WXPUSHER_URL` | Variable | ссылка в сообщении |
+| `WXPUSHER_CONTENT_TYPE` | Variable | `1` текст, `2` HTML, `3` Markdown; значение по умолчанию `1` |
+| `WXPUSHER_VERIFY_PAY_TYPE` | Variable | `0` без проверки, `1` только платные пользователи, `2` пользователи без подписки или с истекшей подпиской |
 
 Этот репозиторий бессрочно не поддерживается.
