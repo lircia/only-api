@@ -40,6 +40,9 @@ type SettingsShape = {
   defaultChannelStrategy: string;
   notifyWorkerUsage: boolean;
   apiPublicBaseUrl?: string;
+  themeName: string;
+  emailDomainValidationEnabled: boolean;
+  qqEmailNumericPrefixRequired: boolean;
 };
 
 type NavKey = 'dashboard' | 'keys' | 'usage' | 'models' | 'settings' | 'users' | 'channels' | 'workerUsage';
@@ -56,8 +59,19 @@ const defaultSettings: SettingsShape = {
   healthCheckIntervalMinutes: 60,
   workerUsageIntervalMinutes: 60,
   defaultChannelStrategy: 'priority',
-  notifyWorkerUsage: false
+  notifyWorkerUsage: false,
+  themeName: 'blue-white',
+  emailDomainValidationEnabled: true,
+  qqEmailNumericPrefixRequired: true
 };
+
+const themeOptions = [
+  { key: 'blue-white', label: '蓝白', colors: ['#2563eb', '#ffffff'] },
+  { key: 'black-white', label: '黑白', colors: ['#111111', '#ffffff'] },
+  { key: 'yellow-purple', label: '黄紫', colors: ['#facc15', '#6d28d9'] },
+  { key: 'green-red', label: '绿红', colors: ['#16a34a', '#dc2626'] },
+  { key: 'pink-orange', label: '粉橙', colors: ['#ec4899', '#f97316'] }
+];
 
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem(tokenStoreKey) || '');
@@ -70,6 +84,10 @@ function App() {
   const [notice, setNotice] = useState('');
 
   const api = useMemo(() => makeApi(token, setNotice), [token]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = settings.themeName || 'blue-white';
+  }, [settings.themeName]);
 
   async function refreshBootstrap() {
     const data = await api.get('/api/public/bootstrap', false);
@@ -247,12 +265,21 @@ function Setup({ settings, api, onDone }: { settings: SettingsShape; api: ApiCli
 }
 
 function Auth({ settings, api, onLogin }: { settings: SettingsShape; api: ApiClient; onLogin: (token: string, user: User) => void }) {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [form, setForm] = useState({ email: '', name: '', password: '' });
+  const [mode, setMode] = useState<'login' | 'register' | 'verify'>('login');
+  const [form, setForm] = useState({ email: '', name: '', password: '', confirmPassword: '' });
+  const [verificationEmail, setVerificationEmail] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const captchaToken = useTurnstile(settings.captchaEnabled && mode === 'register' ? settings.captchaSiteKey : '');
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = window.setTimeout(() => setResendCooldown((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendCooldown]);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -265,13 +292,67 @@ function Auth({ settings, api, onLogin }: { settings: SettingsShape; api: ApiCli
         onLogin(data.token, data.user);
         return;
       }
+      if (mode === 'verify') {
+        const data = await api.post('/api/auth/verify-code', { email: verificationEmail, code: verificationCode }, false);
+        setMode('login');
+        setVerificationCode('');
+        setMessage(data.message || '邮箱已验证，可以登录');
+        return;
+      }
+      if (form.password !== form.confirmPassword) {
+        throw new Error('两次输入的密码不一致');
+      }
       const data = await api.post('/api/auth/register', { ...form, captchaToken: captchaToken.token }, false);
-      setMessage(data.message || '注册成功，请检查邮箱');
+      if (data.pendingVerification) {
+        setVerificationEmail(data.email || form.email);
+        setVerificationCode('');
+        setResendCooldown(67);
+        setMode('verify');
+        setMessage(data.message || '验证码已发送，请检查邮箱');
+        return;
+      }
+      setMessage(data.message || '注册成功，可以直接登录');
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : '请求失败');
+      if (mode === 'verify') setResendCooldown(67);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function resendCode() {
+    setError('');
+    setMessage('');
+    setBusy(true);
+    try {
+      const data = await api.post('/api/auth/resend-code', { email: verificationEmail }, false);
+      setResendCooldown(Number(data.resendAfterSeconds || 67));
+      setMessage(data.message || '验证码已重新发送');
+    } catch (resendError: any) {
+      setError(resendError instanceof Error ? resendError.message : '验证码重发失败');
+      setResendCooldown(67);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (mode === 'verify') {
+    return (
+      <form className="panel narrow" onSubmit={submit}>
+        <h2>输入邮箱验证码</h2>
+        <p>验证码已发送到 {verificationEmail}，13 分钟内有效，最多可输入 3 次。</p>
+        <Input label="13 位数字验证码" value={verificationCode} onChange={(code) => setVerificationCode(code.replace(/\D/g, '').slice(0, 13))} />
+        {error && <p className="errorText">{error}</p>}
+        {message && <p className="successText">{message}</p>}
+        <button className="primaryBtn" disabled={busy || verificationCode.length !== 13}><CheckCircle2 />{busy ? '请稍候' : '完成验证'}</button>
+        <div className="rowActions left">
+          <button type="button" className="smallBtn" onClick={resendCode} disabled={busy || resendCooldown > 0}>
+            {resendCooldown > 0 ? `${resendCooldown} 秒后可重发` : '没收到？重新发送'}
+          </button>
+          <button type="button" className="smallBtn" onClick={() => setMode('login')}>返回登录</button>
+        </div>
+      </form>
+    );
   }
 
   return (
@@ -283,6 +364,7 @@ function Auth({ settings, api, onLogin }: { settings: SettingsShape; api: ApiCli
       {mode === 'register' && <Input label="名称" value={form.name} onChange={(name) => setForm({ ...form, name })} />}
       <Input label="邮箱" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} />
       <Input label="密码" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} />
+      {mode === 'register' && <Input label="确认密码" type="password" value={form.confirmPassword} onChange={(confirmPassword) => setForm({ ...form, confirmPassword })} />}
       {settings.captchaEnabled && mode === 'register' && <div className="turnstile" ref={captchaToken.ref}>{settings.captchaSiteKey ? '' : '未配置 Turnstile Site Key'}</div>}
       {error && <p className="errorText">{error}</p>}
       <button className="primaryBtn" disabled={busy}>{mode === 'login' ? <LogOut /> : <CheckCircle2 />}{busy ? '请稍候' : mode === 'login' ? '登录' : '创建账号'}</button>
@@ -360,14 +442,79 @@ function ApiKeys({ api, publicBase }: { api: ApiClient; publicBase: string }) {
 
 function Usage({ api }: { api: ApiClient }) {
   const [rows, setRows] = useState<any[]>([]);
-  useLoad(() => api.get('/api/usage-summary').then((data) => setRows(data.rows)), []);
+  const [modelRows, setModelRows] = useState<any[]>([]);
+  const [hourlyRows, setHourlyRows] = useState<any[]>([]);
+  const [statusRows, setStatusRows] = useState<any[]>([]);
+  useLoad(() => api.get('/api/usage-summary').then((data) => {
+    setRows(data.rows || []);
+    setModelRows(data.modelRows || []);
+    setHourlyRows(data.hourlyRows || []);
+    setStatusRows(data.statusRows || []);
+  }), []);
   return (
     <section className="content">
+      <div className="usageGrid">
+        <div className="panel">
+          <h2>24 小时请求趋势</h2>
+          <BarList rows={hourlyRows} labelKey="hour" valueKey="requests" />
+        </div>
+        <div className="panel">
+          <h2>模型 Token 分布</h2>
+          <BarList rows={modelRows.slice(0, 10)} labelKey="model" valueKey="tokens" />
+        </div>
+        <div className="panel">
+          <h2>状态码分布</h2>
+          <StatusBlocks rows={statusRows} />
+        </div>
+      </div>
       <div className="panel">
         <h2>用量统计表</h2>
         <DataTable rows={rows} columns={['range', 'requests', 'tokens', 'latency', 'errors', 'success_rate']} />
       </div>
+      <div className="panel">
+        <h2>模型用量表</h2>
+        <DataTable rows={modelRows} columns={['model', 'requests', 'tokens', 'latency', 'errors', 'success_rate']} />
+      </div>
     </section>
+  );
+}
+
+function BarList({ rows, labelKey, valueKey }: { rows: any[]; labelKey: string; valueKey: string }) {
+  if (!rows.length) return <div className="empty compact">暂无数据</div>;
+  const max = Math.max(...rows.map((row) => Number(row[valueKey] || 0)), 1);
+  return (
+    <div className="barList">
+      {rows.map((row, index) => {
+        const value = Number(row[valueKey] || 0);
+        return (
+          <div className="barItem" key={`${row[labelKey]}-${index}`}>
+            <span title={String(row[labelKey])}>{formatCell(row[labelKey])}</span>
+            <div><i style={{ width: `${Math.max(4, (value / max) * 100)}%` }} /></div>
+            <strong>{value}</strong>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function StatusBlocks({ rows }: { rows: any[] }) {
+  if (!rows.length) return <div className="empty compact">暂无数据</div>;
+  const total = rows.reduce((sum, row) => sum + Number(row.requests || 0), 0) || 1;
+  return (
+    <div className="statusBlocks">
+      {rows.map((row) => {
+        const status = Number(row.status || 0);
+        const requests = Number(row.requests || 0);
+        return (
+          <div className={status >= 400 ? 'statusBlock error' : 'statusBlock ok'} key={row.status}>
+            <span>{row.status}</span>
+            <strong>{requests}</strong>
+            <i>{Math.round((requests / total) * 100)}%</i>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -462,10 +609,16 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
       <div className="panel settingsGrid">
         <h2>系统设置</h2>
         <Input label="站点名称" value={form.siteName} onChange={(siteName) => setForm({ ...form, siteName })} />
+        <ThemePicker value={form.themeName || 'blue-white'} onChange={(themeName) => {
+          document.documentElement.dataset.theme = themeName;
+          setForm({ ...form, themeName });
+        }} />
         <Segmented value={form.appMode} options={[['self', '自用配置'], ['multi', '多人配置']]} onChange={(appMode) => setForm({ ...form, appMode: appMode as 'self' | 'multi', emailVerificationEnabled: appMode === 'multi' })} />
         <p className="hintText">自用配置默认关闭邮箱验证；多人配置默认启用邮箱验证，可按需要手动调整。</p>
         <Toggle label="开放注册" checked={form.registrationEnabled} onChange={(registrationEnabled) => setForm({ ...form, registrationEnabled })} />
         <Toggle label="邮箱验证" checked={form.emailVerificationEnabled} onChange={(emailVerificationEnabled) => setForm({ ...form, emailVerificationEnabled })} />
+        <Toggle label="邮箱后缀验证" checked={form.emailDomainValidationEnabled} onChange={(emailDomainValidationEnabled) => setForm({ ...form, emailDomainValidationEnabled })} />
+        <Toggle label="QQ 邮箱强制数字前缀" checked={form.qqEmailNumericPrefixRequired} onChange={(qqEmailNumericPrefixRequired) => setForm({ ...form, qqEmailNumericPrefixRequired })} />
         <Toggle label="人机验证" checked={form.captchaEnabled} onChange={(captchaEnabled) => setForm({ ...form, captchaEnabled })} />
         <Input label="Turnstile Site Key" value={form.captchaSiteKey || ''} onChange={(captchaSiteKey) => setForm({ ...form, captchaSiteKey })} />
         <Input label="渠道检测间隔（分钟）" type="number" value={String(form.healthCheckIntervalMinutes)} onChange={(value) => setForm({ ...form, healthCheckIntervalMinutes: Number(value) })} />
@@ -482,6 +635,25 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
         <button className="primaryBtn" onClick={save}><Save />保存设置</button>
       </div>
     </section>
+  );
+}
+
+function ThemePicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="themePicker">
+      <span>颜色主题</span>
+      <div>
+        {themeOptions.map((theme) => (
+          <button key={theme.key} className={value === theme.key ? 'active' : ''} onClick={() => onChange(theme.key)}>
+            <i>
+              <b style={{ background: theme.colors[0] }} />
+              <b style={{ background: theme.colors[1] }} />
+            </i>
+            {theme.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -586,7 +758,7 @@ function WorkerUsage({ api }: { api: ApiClient }) {
   return (
     <section className="content">
       <div className="toolbar"><h2>Workers 用量监测</h2><button className="primaryBtn" onClick={capture} disabled={busy || !configured}><RefreshCw className={busy ? 'spin' : ''} />{busy ? '检测中' : '立即采集'}</button></div>
-      {!configured && <div className="panel"><div className="errorText">请配置 CF_ACCOUNT_ID 和 CF_API_TOKEN 变量后再检测 Workers 用量。</div></div>}
+      {!configured && <div className="panel"><div className="errorText">请配置 CF_ACCOUNT_ID（或 CLOUDFLARE_ACCOUNT_ID / CF_ZONE_ID）和 CF_API_TOKEN（或 CLOUDFLARE_API_TOKEN）变量后再检测 Workers 用量。</div></div>}
       <div className="panel"><DataTable rows={rows} columns={['created_at', 'requests', 'errors', 'cpu_time_ms', 'period_start', 'period_end']} /></div>
     </section>
   );
@@ -753,6 +925,7 @@ function labelOf(key: string) {
     period_start: '开始',
     period_end: '结束',
     range: '范围',
+    hour: '小时',
     tokens: 'Token',
     latency: '平均延迟',
     success_rate: '成功率'

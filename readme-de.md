@@ -20,6 +20,8 @@ Die englische Standarddokumentation befindet sich in [README.md](README.md). Wei
 - Neue API Keys verwenden `oi-only-`. Früher erstellte Keys bleiben gültig.
 - `/v1/models` gibt die im Modellplatz aktivierten Modellnamen zurück.
 - Im Modellplatz können Anzeigenamen bearbeitet, kopiert und ausgeblendet werden.
+- Die Registrierung mit E-Mail-Verifizierung nutzt einen 13-stelligen Zahlencode, der 13 Minuten gültig ist, 3 Eingabeversuche erlaubt und nach 67 Sekunden erneut gesendet werden kann.
+- E-Mail-Domainprüfung und numerischer QQ-Mail-Präfix sind in den Systemeinstellungen umschaltbar und standardmäßig aktiviert.
 - Jeder Kanal hat eine eigene Testschaltfläche. Beim Test werden Modelle über `/models` synchronisiert.
 - Die Nutzungsstatistik zeigt 3 Stunden, 1 Tag, 7 Tage, 15 Tage und Gesamtwerte.
 - In den Systemeinstellungen können Telegram- und WxPusher-Testnachrichten gesendet werden.
@@ -135,6 +137,19 @@ Nach der Pages-Bereitstellung setze die Worker-Variable `APP_ORIGIN` auf die Pag
 ## Ersteinrichtung und API-Nutzung
 
 Öffne die Pages-URL und gib `ADMIN_SETUP_SECRET`, E-Mail, Passwort, Seitennamen sowie Eigenmodus oder Mehrbenutzermodus ein.
+
+## E-Mail-Verifizierung bei Registrierung
+
+Wenn E-Mail-Verifizierung aktiviert ist, wird bei der Registrierung kein Link mehr gesendet. Stattdessen wird ein 13-stelliger Zahlencode per E-Mail verschickt.
+
+- Der Code ist 13 Minuten gültig.
+- Jeder Code erlaubt 3 Eingabeversuche.
+- Die Code-Seite enthält eine Schaltfläche zum erneuten Senden.
+- Für erneutes Senden gilt eine Abklingzeit von 67 Sekunden.
+- Das Registrierungsformular enthält ein Feld zur Passwortbestätigung.
+- Die E-Mail-Domainprüfung ist standardmäßig aktiviert und unterstützt bekannte Anbieter wie `qq.com`, `163.com`, `gmail.com`, `outlook.com`, `yeah.net`, `hotmail.com` und `126.com`.
+- QQ-Mail-Adressen müssen standardmäßig einen rein numerischen QQ-Präfix verwenden.
+- Administratoren können die Domainprüfung und den numerischen QQ-Präfix in den Systemeinstellungen deaktivieren.
 
 Client-Basis-URL:
 

@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS email_verifications (
   user_id TEXT NOT NULL,
   token_hash TEXT NOT NULL,
   expires_at TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at TEXT,
   consumed_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -113,6 +115,9 @@ INSERT OR IGNORE INTO system_settings (key, value) VALUES
   ('emailVerificationEnabled', 'false'),
   ('captchaEnabled', 'false'),
   ('captchaSiteKey', '""'),
+  ('themeName', '"blue-white"'),
+  ('emailDomainValidationEnabled', 'true'),
+  ('qqEmailNumericPrefixRequired', 'true'),
   ('healthCheckIntervalMinutes', '60'),
   ('workerUsageIntervalMinutes', '60'),
   ('lastHealthCheckAt', '""'),

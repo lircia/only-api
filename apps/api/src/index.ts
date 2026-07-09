@@ -9,7 +9,10 @@ export interface Env {
   TURNSTILE_SECRET_KEY?: string;
   API_PUBLIC_BASE_URL?: string;
   CF_ACCOUNT_ID?: string;
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  CF_ZONE_ID?: string;
   CF_API_TOKEN?: string;
+  CLOUDFLARE_API_TOKEN?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
   TELEGRAM_PARSE_MODE?: string;
@@ -46,6 +49,21 @@ const jsonHeaders = {
   'content-type': 'application/json; charset=utf-8'
 };
 
+const allowedEmailDomains = new Set([
+  'qq.com',
+  '163.com',
+  'gmail.com',
+  'outlook.com',
+  'yeah.net',
+  'hotmail.com',
+  '126.com',
+  'foxmail.com',
+  'icloud.com',
+  'yahoo.com',
+  'sina.com',
+  'live.com'
+]);
+
 const defaultPublicSettings = {
   siteName: 'Only API',
   appMode: 'self',
@@ -53,7 +71,10 @@ const defaultPublicSettings = {
   emailVerificationEnabled: false,
   captchaEnabled: false,
   captchaSiteKey: '',
-  apiPublicBaseUrl: ''
+  apiPublicBaseUrl: '',
+  themeName: 'blue-white',
+  emailDomainValidationEnabled: true,
+  qqEmailNumericPrefixRequired: true
 };
 
 export default {
@@ -91,6 +112,8 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (method === 'POST' && path === '/api/setup') return setupSuperAdmin(request, env);
   if (method === 'POST' && path === '/api/auth/register') return registerUser(request, env);
   if (method === 'GET' && path === '/api/auth/verify') return verifyEmail(request, env);
+  if (method === 'POST' && path === '/api/auth/verify-code') return verifyEmailCode(request, env);
+  if (method === 'POST' && path === '/api/auth/resend-code') return resendEmailCode(request, env);
   if (method === 'POST' && path === '/api/auth/login') return loginUser(request, env);
 
   const user = await requireSession(request, env);
@@ -123,7 +146,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     return json(await checkSingleChannelHealth(env, channelId));
   }
   if (method === 'POST' && path === '/api/admin/worker-usage-check') {
-    if (!hasWorkerUsageConfig(env)) return json({ error: '请配置 CF_ACCOUNT_ID 和 CF_API_TOKEN 变量' }, 400);
+    if (!hasWorkerUsageConfig(env)) return json({ error: '请配置 CF_ACCOUNT_ID（或 CLOUDFLARE_ACCOUNT_ID / CF_ZONE_ID）和 CF_API_TOKEN（或 CLOUDFLARE_API_TOKEN）变量' }, 400);
     await captureWorkerUsage(env);
     return json({ ok: true, message: '检测成功' });
   }
@@ -151,7 +174,10 @@ async function getBootstrap(env: Env): Promise<Response> {
       emailVerificationEnabled: isEmailVerificationRequired(settings),
       captchaEnabled: settings.captchaEnabled ?? false,
       captchaSiteKey: settings.captchaSiteKey ?? '',
-      apiPublicBaseUrl: env.API_PUBLIC_BASE_URL ?? ''
+      apiPublicBaseUrl: env.API_PUBLIC_BASE_URL ?? '',
+      themeName: settings.themeName ?? defaultPublicSettings.themeName,
+      emailDomainValidationEnabled: settings.emailDomainValidationEnabled ?? true,
+      qqEmailNumericPrefixRequired: settings.qqEmailNumericPrefixRequired ?? true
     }
   });
 }
@@ -177,7 +203,10 @@ async function setupSuperAdmin(request: Request, env: Env): Promise<Response> {
     emailVerificationEnabled: body.appMode === 'multi',
     captchaEnabled: false,
     healthCheckIntervalMinutes: 60,
-    workerUsageIntervalMinutes: 60
+    workerUsageIntervalMinutes: 60,
+    themeName: 'blue-white',
+    emailDomainValidationEnabled: true,
+    qqEmailNumericPrefixRequired: true
   };
   await saveSettings(env, settings);
   const session = await createSession(env, userId);
@@ -185,10 +214,13 @@ async function setupSuperAdmin(request: Request, env: Env): Promise<Response> {
 }
 
 async function registerUser(request: Request, env: Env): Promise<Response> {
+  await ensureEmailVerificationColumns(env);
   const settings = await getSettings(env);
   if (settings.registrationEnabled === false) return json({ error: '注册已关闭' }, 403);
   const body = await readJson(request);
-  assertEmail(body.email);
+  const email = normalizeEmail(body.email);
+  assertEmail(email);
+  assertEmailPolicy(email, settings);
   assertPassword(body.password);
   if (settings.captchaEnabled === true) await verifyCaptcha(body.captchaToken, env);
 
@@ -197,23 +229,28 @@ async function registerUser(request: Request, env: Env): Promise<Response> {
     return json({ error: '多人配置需要先配置 Resend 邮件发送变量' }, 400);
   }
 
-  const userId = id('usr');
+  const existing = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first<any>();
+  if (existing?.email_verified_at) return json({ error: '邮箱已注册，请直接登录' }, 409);
+
+  const userId = existing?.id || id('usr');
   const passwordHash = await hashPassword(body.password);
   const verifiedAt = requireEmailVerification ? null : new Date().toISOString();
-  await env.DB.prepare(
-    'INSERT INTO users (id, email, name, password_hash, role, status, email_verified_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(userId, body.email.toLowerCase(), body.name || body.email.split('@')[0], passwordHash, 'user', 'active', verifiedAt).run();
+  const displayName = body.name || email.split('@')[0];
+  if (existing) {
+    await env.DB.prepare('UPDATE users SET name = ?, password_hash = ?, status = "active", email_verified_at = ?, updated_at = ? WHERE id = ?')
+      .bind(displayName, passwordHash, verifiedAt, new Date().toISOString(), userId).run();
+  } else {
+    await env.DB.prepare(
+      'INSERT INTO users (id, email, name, password_hash, role, status, email_verified_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(userId, email, displayName, passwordHash, 'user', 'active', verifiedAt).run();
+  }
 
   if (!requireEmailVerification) {
     return json({ ok: true, message: '注册成功，可以直接登录' }, 201);
   }
 
-  const rawToken = randomToken(32);
-  await env.DB.prepare(
-    'INSERT INTO email_verifications (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)'
-  ).bind(id('emv'), userId, await sha256(rawToken), plusHours(24)).run();
-  await sendVerificationEmail(env, body.email.toLowerCase(), rawToken);
-  return json({ ok: true, message: '注册成功，请检查邮箱完成验证' }, 201);
+  await issueEmailVerificationCode(env, userId, email, false);
+  return json({ ok: true, pendingVerification: true, email, message: '验证码已发送，请在 13 分钟内完成验证' }, 201);
 }
 
 async function verifyEmail(request: Request, env: Env): Promise<Response> {
@@ -230,6 +267,65 @@ async function verifyEmail(request: Request, env: Env): Promise<Response> {
     env.DB.prepare('UPDATE email_verifications SET consumed_at = ? WHERE id = ?').bind(now, record.id)
   ]);
   return json({ ok: true, message: '邮箱已验证，可以登录' });
+}
+
+async function verifyEmailCode(request: Request, env: Env): Promise<Response> {
+  await ensureEmailVerificationColumns(env);
+  const body = await readJson(request);
+  const email = normalizeEmail(body.email);
+  const code = String(body.code || '').trim();
+  assertEmail(email);
+  if (!/^\d{13}$/.test(code)) return json({ error: '验证码必须是 13 位数字' }, 400);
+
+  const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first<any>();
+  if (!user) return json({ error: '账号不存在，请重新注册' }, 404);
+  if (user.email_verified_at) return json({ ok: true, message: '邮箱已验证，可以登录' });
+
+  const record = await env.DB.prepare(
+    'SELECT * FROM email_verifications WHERE user_id = ? AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1'
+  ).bind(user.id).first<any>();
+  if (!record) return json({ error: '验证码不存在或已作废，请重新发送' }, 400);
+  if (Date.parse(record.expires_at) <= Date.now()) {
+    await env.DB.prepare('UPDATE email_verifications SET consumed_at = ? WHERE id = ?').bind(new Date().toISOString(), record.id).run();
+    return json({ error: '验证码已过期，请重新发送' }, 400);
+  }
+  if (Number(record.attempts || 0) >= 3) return json({ error: '验证码输入次数已用完，请重新发送' }, 400);
+
+  const codeHash = await sha256(code);
+  if (codeHash !== record.token_hash) {
+    const attempts = Number(record.attempts || 0) + 1;
+    const consumedAt = attempts >= 3 ? new Date().toISOString() : null;
+    await env.DB.prepare('UPDATE email_verifications SET attempts = ?, last_attempt_at = ?, consumed_at = COALESCE(?, consumed_at) WHERE id = ?')
+      .bind(attempts, new Date().toISOString(), consumedAt, record.id).run();
+    return json({
+      error: attempts >= 3 ? '验证码错误次数已用完，请重新发送' : '验证码错误',
+      attemptsRemaining: Math.max(0, 3 - attempts),
+      resendAfterSeconds: 67
+    }, 400);
+  }
+
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare('UPDATE users SET email_verified_at = ?, updated_at = ? WHERE id = ?').bind(now, now, user.id),
+    env.DB.prepare('UPDATE email_verifications SET consumed_at = ? WHERE id = ?').bind(now, record.id)
+  ]);
+  return json({ ok: true, message: '邮箱已验证，可以登录' });
+}
+
+async function resendEmailCode(request: Request, env: Env): Promise<Response> {
+  await ensureEmailVerificationColumns(env);
+  const settings = await getSettings(env);
+  if (!isEmailVerificationRequired(settings)) return json({ error: '当前系统未启用邮箱验证' }, 400);
+  if (!env.RESEND_API_KEY || !env.RESEND_FROM) return json({ error: '请先配置 Resend 邮件发送变量' }, 400);
+  const body = await readJson(request);
+  const email = normalizeEmail(body.email);
+  assertEmail(email);
+  assertEmailPolicy(email, settings);
+  const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first<any>();
+  if (!user) return json({ error: '账号不存在，请重新注册' }, 404);
+  if (user.email_verified_at) return json({ ok: true, message: '邮箱已验证，可以登录' });
+  await issueEmailVerificationCode(env, user.id, email, true);
+  return json({ ok: true, message: '验证码已重新发送', resendAfterSeconds: 67 });
 }
 
 async function loginUser(request: Request, env: Env): Promise<Response> {
@@ -279,6 +375,8 @@ async function getUsage(env: Env, user: AuthedUser, url: URL): Promise<Response>
 
 async function getUsageSummary(env: Env, user: AuthedUser): Promise<Response> {
   const admin = isAdmin(user);
+  const userWhere = admin ? '' : 'WHERE user_id = ?';
+  const userBinds = admin ? [] : [user.id];
   const ranges = [
     { key: '3h', label: '3 小时', since: '-3 hours' },
     { key: '1d', label: '1 日内', since: '-1 day' },
@@ -314,7 +412,53 @@ async function getUsageSummary(env: Env, user: AuthedUser): Promise<Response> {
       success_rate: requests ? `${Math.round(((requests - errors) / requests) * 100)}%` : '—'
     });
   }
-  return json({ rows });
+  const [modelRows, hourlyRows, statusRows] = await Promise.all([
+    env.DB.prepare(
+      `SELECT COALESCE(NULLIF(model, ''), 'unknown') AS model,
+        COUNT(*) AS requests,
+        COALESCE(SUM(total_tokens),0) AS tokens,
+        COALESCE(AVG(latency_ms),0) AS latency,
+        COALESCE(SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END),0) AS errors
+       FROM usage_logs ${userWhere}
+       GROUP BY COALESCE(NULLIF(model, ''), 'unknown')
+       ORDER BY requests DESC
+       LIMIT 30`
+    ).bind(...userBinds).all<any>(),
+    env.DB.prepare(
+      `SELECT strftime('%Y-%m-%d %H:00:00', created_at) AS hour,
+        COUNT(*) AS requests,
+        COALESCE(SUM(total_tokens),0) AS tokens
+       FROM usage_logs
+       WHERE created_at >= datetime('now', '-24 hours') ${admin ? '' : 'AND user_id = ?'}
+       GROUP BY strftime('%Y-%m-%d %H:00:00', created_at)
+       ORDER BY hour ASC`
+    ).bind(...userBinds).all<any>(),
+    env.DB.prepare(
+      `SELECT status, COUNT(*) AS requests
+       FROM usage_logs ${userWhere}
+       GROUP BY status
+       ORDER BY requests DESC
+       LIMIT 12`
+    ).bind(...userBinds).all<any>()
+  ]);
+  const normalizedModelRows = (modelRows.results || []).map((row: any) => {
+    const requests = Number(row.requests || 0);
+    const errors = Number(row.errors || 0);
+    return {
+      model: row.model,
+      requests,
+      tokens: Number(row.tokens || 0),
+      latency: Math.round(Number(row.latency || 0)),
+      errors,
+      success_rate: requests ? `${Math.round(((requests - errors) / requests) * 100)}%` : '—'
+    };
+  });
+  return json({
+    rows,
+    modelRows: normalizedModelRows,
+    hourlyRows: hourlyRows.results || [],
+    statusRows: statusRows.results || []
+  });
 }
 
 async function listApiKeys(env: Env, user: AuthedUser): Promise<Response> {
@@ -382,6 +526,9 @@ async function updateAdminSettings(request: Request, env: Env): Promise<Response
     'emailVerificationEnabled',
     'captchaEnabled',
     'captchaSiteKey',
+    'themeName',
+    'emailDomainValidationEnabled',
+    'qqEmailNumericPrefixRequired',
     'healthCheckIntervalMinutes',
     'workerUsageIntervalMinutes',
     'defaultChannelStrategy',
@@ -745,14 +892,16 @@ async function listGatewayModels(env: Env): Promise<Response> {
 async function captureWorkerUsage(env: Env): Promise<void> {
   if (!hasWorkerUsageConfig(env)) return;
   let snapshot = { requests: 0, errors: 0, cpu_time_ms: 0, period_start: '', period_end: '' };
-  if (env.CF_ACCOUNT_ID && env.CF_API_TOKEN) {
+  const accountId = getCloudflareAccountId(env);
+  const apiToken = getCloudflareApiToken(env);
+  if (accountId && apiToken) {
     try {
       const end = new Date();
       const start = new Date(end.getTime() - 60 * 60 * 1000);
       const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
         method: 'POST',
         headers: {
-          authorization: `Bearer ${env.CF_API_TOKEN}`,
+          authorization: `Bearer ${apiToken}`,
           'content-type': 'application/json'
         },
         body: JSON.stringify({
@@ -766,7 +915,7 @@ async function captureWorkerUsage(env: Env): Promise<void> {
             }
           }`,
           variables: {
-            accountTag: env.CF_ACCOUNT_ID,
+            accountTag: accountId,
             datetime_geq: start.toISOString(),
             datetime_leq: end.toISOString()
           }
@@ -798,7 +947,15 @@ async function captureWorkerUsage(env: Env): Promise<void> {
 }
 
 function hasWorkerUsageConfig(env: Env): boolean {
-  return Boolean(env.CF_ACCOUNT_ID && env.CF_API_TOKEN);
+  return Boolean(getCloudflareAccountId(env) && getCloudflareApiToken(env));
+}
+
+function getCloudflareAccountId(env: Env): string {
+  return (env.CF_ACCOUNT_ID || env.CLOUDFLARE_ACCOUNT_ID || env.CF_ZONE_ID || '').trim();
+}
+
+function getCloudflareApiToken(env: Env): string {
+  return (env.CF_API_TOKEN || env.CLOUDFLARE_API_TOKEN || '').trim();
 }
 
 async function sendUsageNotifications(env: Env, message: string): Promise<void> {
@@ -968,6 +1125,52 @@ function normalizeWxPusherVerifyPayType(value: string | undefined): number | und
   return [0, 1, 2].includes(verifyPayType) ? verifyPayType : 0;
 }
 
+async function issueEmailVerificationCode(env: Env, userId: string, email: string, enforceCooldown: boolean): Promise<void> {
+  const latest = await env.DB.prepare('SELECT * FROM email_verifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1').bind(userId).first<any>();
+  if (enforceCooldown && latest?.created_at) {
+    const ageSeconds = Math.floor((Date.now() - Date.parse(latest.created_at)) / 1000);
+    if (ageSeconds < 67) throw new HttpError(`请 ${67 - ageSeconds} 秒后再重新发送验证码`, 429);
+  }
+  await env.DB.prepare('UPDATE email_verifications SET consumed_at = ? WHERE user_id = ? AND consumed_at IS NULL')
+    .bind(new Date().toISOString(), userId).run();
+  const code = randomDigits(13);
+  await env.DB.prepare(
+    'INSERT INTO email_verifications (id, user_id, token_hash, expires_at, attempts, last_attempt_at) VALUES (?, ?, ?, ?, 0, NULL)'
+  ).bind(id('emv'), userId, await sha256(code), plusMinutes(13)).run();
+  await sendVerificationCodeEmail(env, email, code);
+}
+
+async function ensureEmailVerificationColumns(env: Env): Promise<void> {
+  await ignoreDuplicateColumn(env.DB.prepare('ALTER TABLE email_verifications ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0').run());
+  await ignoreDuplicateColumn(env.DB.prepare('ALTER TABLE email_verifications ADD COLUMN last_attempt_at TEXT').run());
+}
+
+async function ignoreDuplicateColumn(job: Promise<unknown>): Promise<void> {
+  try {
+    await job;
+  } catch (error) {
+    const message = getErrorMessage(error).toLowerCase();
+    if (!message.includes('duplicate') && !message.includes('already exists')) throw error;
+  }
+}
+
+async function sendVerificationCodeEmail(env: Env, email: string, code: string): Promise<void> {
+  if (!env.RESEND_API_KEY || !env.RESEND_FROM) return;
+  await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${env.RESEND_API_KEY}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      from: env.RESEND_FROM,
+      to: email,
+      subject: 'Only API 注册验证码',
+      html: `<p>你的 Only API 注册验证码是：</p><p style="font-size:24px;font-weight:700;letter-spacing:3px">${code}</p><p>验证码 13 分钟内有效，最多可输入 3 次。</p>`
+    })
+  });
+}
+
 async function sendVerificationEmail(env: Env, email: string, token: string): Promise<void> {
   if (!env.RESEND_API_KEY || !env.RESEND_FROM) return;
   const appBase = env.APP_ORIGIN || '';
@@ -1135,6 +1338,20 @@ function assertEmail(email: string): void {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '')) throw new HttpError('邮箱格式不正确', 400);
 }
 
+function normalizeEmail(email: string): string {
+  return String(email || '').trim().toLowerCase();
+}
+
+function assertEmailPolicy(email: string, settings: Record<string, any>): void {
+  const [prefix, domain = ''] = email.split('@');
+  if (settings.emailDomainValidationEnabled !== false && !allowedEmailDomains.has(domain)) {
+    throw new HttpError(`邮箱后缀暂不支持，请使用常见邮箱：${Array.from(allowedEmailDomains).join('、')}`, 400);
+  }
+  if (settings.qqEmailNumericPrefixRequired !== false && domain === 'qq.com' && !/^\d+$/.test(prefix)) {
+    throw new HttpError('QQ 邮箱必须使用纯数字 QQ 号前缀', 400);
+  }
+}
+
 function assertPassword(password: string): void {
   if (!password || password.length < 8) throw new HttpError('密码至少需要 8 位', 400);
 }
@@ -1188,12 +1405,21 @@ function randomToken(bytes = 24): string {
   return base64url(array);
 }
 
+function randomDigits(length: number): string {
+  const array = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(array, (byte) => String(byte % 10)).join('');
+}
+
 function id(prefix: string): string {
   return `${prefix}_${randomToken(12)}`;
 }
 
 function plusHours(hours: number): string {
   return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+}
+
+function plusMinutes(minutes: number): string {
+  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
 }
 
 function getErrorMessage(error: unknown): string {

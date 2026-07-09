@@ -33,6 +33,8 @@ The default README is English. Other README files also include deployment steps:
 - Email verification toggle:
   - Self-use mode defaults to off.
   - Multi-user mode defaults to on.
+- Email code registration: 13-digit code, 13-minute validity, 3 attempts, and 67-second resend cooldown.
+- Optional email-domain validation and numeric QQ email prefix enforcement, both enabled by default.
 - Optional Cloudflare Turnstile verification.
 - User API key creation and revocation.
 - OpenAI-compatible `/v1/*` forwarding.
@@ -207,6 +209,19 @@ After setup:
 - setup page disappears
 - `ADMIN_SETUP_SECRET` is no longer used by the frontend setup flow
 - later changes happen inside the admin dashboard
+
+## Registration Verification
+
+When email verification is enabled, registration no longer sends a verification link. It sends a 13-digit numeric code by email.
+
+- The code is valid for 13 minutes.
+- Each code allows 3 input attempts.
+- The verification page includes a “resend” button.
+- Resending is limited by a 67-second cooldown.
+- The registration form includes a confirm-password field.
+- Email suffix validation is enabled by default for common providers such as `qq.com`, `163.com`, `gmail.com`, `outlook.com`, `yeah.net`, `hotmail.com`, and `126.com`.
+- QQ email addresses must use a numeric QQ-number prefix by default.
+- Admins can disable email suffix validation and numeric QQ prefix enforcement in System Settings.
 
 ## Channel Base URL
 
