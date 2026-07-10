@@ -2,7 +2,7 @@
 
 Only API is a Cloudflare Workers + Pages API gateway for OpenAI-compatible APIs. It provides a Worker backend, a Pages frontend, D1 storage, user login, registration, API key distribution, channel management, a Model Square, usage statistics, Workers usage monitoring, and optional Telegram / WxPusher notifications.
 
-Have you ever wanted to use an API from a provider or platform, but found that the provider endpoint has high local latency or is sometimes unreachable? This project can partially help with that problem by forwarding API requests through Cloudflare.
+Direct calls to an upstream API can suffer from high latency or connection failures when its service nodes are far away or the network route is unstable. Only API forwards requests through Cloudflare and may improve connectivity in these situations. It can also combine multiple OpenAI-compatible providers behind one API endpoint, so clients can use one address to access models from different channels.
 
 We do not provide any API key or upstream API endpoint. This platform is only for API forwarding.
 

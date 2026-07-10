@@ -2,7 +2,7 @@
 
 Only API ist ein OpenAI-kompatibles API-Gateway für Cloudflare Workers + Pages. Es enthält ein Worker-Backend, ein Pages-Frontend, D1-Speicher, Benutzeranmeldung, Registrierung, API-Key-Ausgabe, Kanalverwaltung, einen Modellplatz, Nutzungsstatistiken, Workers-Nutzungsüberwachung und optionale Telegram- oder WxPusher-Benachrichtigungen.
 
-Wolltest du schon einmal die API eines Anbieters oder einer Plattform nutzen, aber der API-Endpunkt hatte lokal hohe Latenz oder war teilweise gar nicht erreichbar? Dieses Projekt kann einen Teil dieses Problems lösen, indem API-Anfragen über Cloudflare weitergeleitet werden.
+Direkte Aufrufe einer Upstream-API können hohe Latenz oder Verbindungsfehler verursachen, wenn deren Dienstknoten weit entfernt oder die Netzwerkroute instabil ist. Only API leitet Anfragen über Cloudflare weiter und kann die Verbindung in solchen Situationen verbessern. Außerdem können mehrere OpenAI-kompatible Anbieter hinter einem einzigen API-Endpunkt gebündelt werden, sodass Clients Modelle verschiedener Kanäle über eine Adresse erreichen.
 
 Wir stellen keine API Keys und keine Upstream-API-Endpunkte bereit. Diese Plattform dient nur zur API-Weiterleitung.
 

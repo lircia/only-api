@@ -28,8 +28,6 @@
   --bg-image-opacity: 0.18;
   --theme-fish-opacity: 0;
   --theme-fish-a: none;
-  --theme-fish-b: none;
-  --theme-fish-c: none;
   background: var(--main-bg);
   color: var(--text);
 }
@@ -94,8 +92,6 @@
   --border-soft: #eadb74;
   --theme-fish-opacity: 0.55;
   --theme-fish-a: url("https://img.rein.ccwu.cc/file/re/rhIGi5V4.png");
-  --theme-fish-b: url("https://img.rein.ccwu.cc/file/re/9aH1R3Xz.png");
-  --theme-fish-c: url("https://img.rein.ccwu.cc/file/re/bJteqonM.png");
 }
 
 :root[data-theme="green-red"] {
@@ -147,6 +143,7 @@ body {
   margin: 0;
   min-width: 320px;
   background: var(--main-bg);
+  touch-action: manipulation;
 }
 
 body::before {
@@ -168,10 +165,10 @@ body::after {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background-image: var(--theme-fish-a), var(--theme-fish-b), var(--theme-fish-c);
-  background-position: calc(100% - 72px) 126px, 44px 58%, calc(100% - 320px) calc(100% - 78px);
+  background-image: var(--theme-fish-a);
+  background-position: calc(100% - 72px) 64px;
   background-repeat: no-repeat;
-  background-size: 118px auto, 88px auto, 142px auto;
+  background-size: 118px auto;
   opacity: var(--theme-fish-opacity);
 }
 
@@ -945,6 +942,10 @@ code {
 }
 
 @media (max-width: 640px) {
+  .field input {
+    font-size: 16px;
+  }
+
   main {
     padding: 18px 12px;
   }
