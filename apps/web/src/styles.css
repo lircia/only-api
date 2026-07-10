@@ -26,6 +26,10 @@
   --notice-text: #705c11;
   --app-bg-image: none;
   --bg-image-opacity: 0.18;
+  --theme-fish-opacity: 0;
+  --theme-fish-a: none;
+  --theme-fish-b: none;
+  --theme-fish-c: none;
   background: var(--main-bg);
   color: var(--text);
 }
@@ -88,6 +92,10 @@
   --field: #fffdf1;
   --border: #dfc731;
   --border-soft: #eadb74;
+  --theme-fish-opacity: 0.55;
+  --theme-fish-a: url("https://img.rein.ccwu.cc/file/re/rhIGi5V4.png");
+  --theme-fish-b: url("https://img.rein.ccwu.cc/file/re/9aH1R3Xz.png");
+  --theme-fish-c: url("https://img.rein.ccwu.cc/file/re/bJteqonM.png");
 }
 
 :root[data-theme="green-red"] {
@@ -112,23 +120,23 @@
 }
 
 :root[data-theme="pink-orange"] {
-  --page: #fff1f5;
-  --main-bg: linear-gradient(180deg, #ffe4ec 0%, #fff7fb 100%);
+  --page: #fff7fa;
+  --main-bg: linear-gradient(180deg, #fff7fa 0%, #ffeef5 100%);
   --surface: #ffffff;
   --text: #3d1630;
   --muted: #7a5a68;
   --muted-strong: #614154;
-  --sidebar: #f97316;
-  --sidebar-bg: linear-gradient(180deg, #fb923c 0%, #ea580c 100%);
-  --sidebar-text: #fff5f8;
-  --sidebar-muted: #fff1e7;
-  --sidebar-active: rgba(255, 255, 255, 0.14);
-  --accent: #f9a8d4;
-  --primary: #f97316;
-  --soft: #ffe4ec;
-  --field: #fff9fb;
-  --border: #ffc4d7;
-  --border-soft: #ffd7e5;
+  --sidebar: #fed7aa;
+  --sidebar-bg: linear-gradient(180deg, #ffedd5 0%, #fed7aa 48%, #fb923c 100%);
+  --sidebar-text: #54290c;
+  --sidebar-muted: #8a4b1f;
+  --sidebar-active: rgba(255, 255, 255, 0.48);
+  --accent: #ffe4ec;
+  --primary: #f59e0b;
+  --soft: #fff0f5;
+  --field: #fffafb;
+  --border: #ffd9e5;
+  --border-soft: #ffe8f0;
 }
 
 * {
@@ -152,6 +160,19 @@ body::before {
   background-position: center;
   background-repeat: no-repeat;
   opacity: var(--bg-image-opacity);
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: var(--theme-fish-a), var(--theme-fish-b), var(--theme-fish-c);
+  background-position: calc(100% - 72px) 126px, 44px 58%, calc(100% - 320px) calc(100% - 78px);
+  background-repeat: no-repeat;
+  background-size: 118px auto, 88px auto, 142px auto;
+  opacity: var(--theme-fish-opacity);
 }
 
 :root[data-has-bg-image="false"] body::before {
@@ -181,7 +202,7 @@ button:disabled {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
-  background: var(--main-bg);
+  background: transparent;
 }
 
 .sidebar {
@@ -273,7 +294,7 @@ nav button:hover,
 main {
   min-width: 0;
   padding: 26px;
-  background: var(--main-bg);
+  background: transparent;
 }
 
 .topbar,
@@ -366,9 +387,7 @@ h2 {
   display: grid;
   place-items: center;
   padding: 28px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--primary) 10%, transparent)),
-    var(--main-bg);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), color-mix(in srgb, var(--primary) 10%, transparent));
 }
 
 .authShell section {
@@ -420,6 +439,12 @@ h2 {
   background: var(--soft);
   color: var(--text);
   padding: 0 12px;
+}
+
+.dangerBtn {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border));
 }
 
 .iconBtn {

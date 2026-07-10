@@ -49,6 +49,20 @@ type SettingsShape = {
 type NavKey = 'dashboard' | 'keys' | 'usage' | 'models' | 'settings' | 'users' | 'channels' | 'workerUsage';
 
 const tokenStoreKey = 'only-api-token';
+function readSavedToken() {
+  return localStorage.getItem(tokenStoreKey) || sessionStorage.getItem(tokenStoreKey) || '';
+}
+
+function saveSessionToken(token: string) {
+  localStorage.setItem(tokenStoreKey, token);
+  sessionStorage.setItem(tokenStoreKey, token);
+}
+
+function clearSessionToken() {
+  localStorage.removeItem(tokenStoreKey);
+  sessionStorage.removeItem(tokenStoreKey);
+}
+
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim();
 const fallbackBackgroundImageUrl = (import.meta.env.VITE_BACKGROUND_IMAGE_URL || '').trim();
@@ -74,11 +88,11 @@ const themeOptions = [
   { key: 'blue-white', label: '蓝白', colors: ['#7dd3fc', '#ffffff', '#e0f7ff', '#0891b2'] },
   { key: 'yellow-purple', label: '黄紫', colors: ['#fff200', '#7c3aed', '#7c3aed', '#fff200'] },
   { key: 'green-red', label: '绿红', colors: ['#dffbea', '#b00020', '#ffffff', '#8b0000'] },
-  { key: 'pink-orange', label: '粉橙', colors: ['#fb923c', '#ffe4ec', '#f97316', '#f9a8d4'] }
+  { key: 'pink-orange', label: '粉橙', colors: ['#fed7aa', '#fff7fa', '#fb923c', '#ffe4ec'] }
 ];
 
 function App() {
-  const [token, setToken] = useState(() => localStorage.getItem(tokenStoreKey) || '');
+  const [token, setToken] = useState(readSavedToken);
   const [user, setUser] = useState<User | null>(null);
   const [settings, setSettings] = useState<SettingsShape>(defaultSettings);
   const [setupRequired, setSetupRequired] = useState(false);
@@ -120,7 +134,7 @@ function App() {
       const data = await api.get('/api/me');
       setUser(data.user);
     } catch {
-      localStorage.removeItem(tokenStoreKey);
+      clearSessionToken();
       setToken('');
       setUser(null);
     }
@@ -141,7 +155,7 @@ function App() {
   }, [token]);
 
   function acceptSession(nextToken: string, nextUser: User) {
-    localStorage.setItem(tokenStoreKey, nextToken);
+    saveSessionToken(nextToken);
     setToken(nextToken);
     setUser(nextUser);
     setSetupRequired(false);
@@ -149,10 +163,13 @@ function App() {
   }
 
   async function logout() {
-    await api.post('/api/auth/logout', {});
-    localStorage.removeItem(tokenStoreKey);
-    setToken('');
-    setUser(null);
+    try {
+      await api.post('/api/auth/logout', {});
+    } finally {
+      clearSessionToken();
+      setToken('');
+      setUser(null);
+    }
   }
 
   const admin = user?.role === 'admin' || user?.role === 'super_admin';
@@ -539,6 +556,7 @@ function StatusBlocks({ rows }: { rows: any[] }) {
 function Models({ api, admin }: { api: ApiClient; admin: boolean }) {
   const [models, setModels] = useState<any[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [cleaning, setCleaning] = useState(false);
   async function load() {
     const data = await api.get('/api/models');
     const rows = data.models || [];
@@ -556,16 +574,33 @@ function Models({ api, admin }: { api: ApiClient; admin: boolean }) {
     await api.delete(`/api/admin/models/${model.id}`);
     await load();
   }
+  async function cleanupOrphans() {
+    setCleaning(true);
+    try {
+      await api.post('/api/admin/models/cleanup-orphans', {});
+      await load();
+    } finally {
+      setCleaning(false);
+    }
+  }
   const grouped = models.reduce<Record<string, any[]>>((acc, model) => {
-    const key = model.channel_name || '未命名渠道';
+    const key = Number(model.is_orphan || 0) === 1 ? '已删除渠道残留模型' : (model.channel_name || '未命名渠道');
     acc[key] = acc[key] || [];
     acc[key].push(model);
     return acc;
   }, {});
+  const orphanCount = models.filter((model) => Number(model.is_orphan || 0) === 1).length;
   return (
     <section className="content">
       <div className="panel">
-        <h2>模型广场</h2>
+        <div className="toolbar compact">
+          <h2>模型广场</h2>
+          {admin && orphanCount > 0 && (
+            <button className="smallBtn dangerBtn" onClick={cleanupOrphans} disabled={cleaning}>
+              <Trash2 />{cleaning ? '清理中' : `清理残留模型 ${orphanCount}`}
+            </button>
+          )}
+        </div>
         <p>渠道测试成功后会自动从上游 `/models` 同步模型。这里显示的模型名会返回给 SillyTavern；如需别名，可直接修改显示名。</p>
         <div className="modelGroups">
           {Object.entries(grouped).length ? Object.entries(grouped).map(([channelName, rows]) => (

@@ -116,6 +116,7 @@ INSERT OR IGNORE INTO system_settings (key, value) VALUES
   ('captchaEnabled', 'false'),
   ('captchaSiteKey', '""'),
   ('themeName', '"black-white"'),
+  ('themeDefaultPinned', 'true'),
   ('backgroundImageUrl', '""'),
   ('emailDomainValidationEnabled', 'true'),
   ('qqEmailNumericPrefixRequired', 'true'),

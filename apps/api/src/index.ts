@@ -81,6 +81,7 @@ const defaultPublicSettings = {
   captchaSiteKey: '',
   apiPublicBaseUrl: '',
   themeName: 'black-white',
+  themeDefaultPinned: true,
   backgroundImageUrl: '',
   emailDomainValidationEnabled: true,
   qqEmailNumericPrefixRequired: true,
@@ -163,6 +164,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     return json({ ok: true, message: '采集成功，已同步推送（如果已配置 Telegram 或 WxPusher 变量）', snapshot });
   }
   if (method === 'GET' && path === '/api/admin/worker-usage') return listWorkerUsage(env);
+  if (method === 'POST' && path === '/api/admin/models/cleanup-orphans') return cleanupOrphanModels(env);
   if (method === 'PATCH' && path.startsWith('/api/admin/models/')) return updateModel(request, env, path.split('/').pop() || '');
   if (method === 'DELETE' && path.startsWith('/api/admin/models/')) return deleteModel(env, path.split('/').pop() || '');
   if (method === 'POST' && path === '/api/admin/notify-test') return testNotification(request, env);
@@ -218,6 +220,7 @@ async function setupSuperAdmin(request: Request, env: Env): Promise<Response> {
     healthCheckIntervalMinutes: 60,
     workerUsageIntervalMinutes: 360,
     themeName: 'black-white',
+    themeDefaultPinned: true,
     backgroundImageUrl: '',
     emailDomainValidationEnabled: true,
     qqEmailNumericPrefixRequired: true,
@@ -505,7 +508,12 @@ async function deleteApiKey(env: Env, user: AuthedUser, keyId: string): Promise<
 
 async function listModels(env: Env): Promise<Response> {
   const rows = await env.DB.prepare(
-    'SELECT m.id, m.channel_id, m.model_id, m.display_name, m.status, c.name AS channel_name FROM model_catalog m LEFT JOIN channels c ON c.id = m.channel_id WHERE m.status = "enabled" ORDER BY COALESCE(NULLIF(m.display_name, ""), m.model_id) ASC'
+    `SELECT m.id, m.channel_id, m.model_id, m.display_name, m.status, c.name AS channel_name,
+      CASE WHEN c.id IS NULL THEN 1 ELSE 0 END AS is_orphan
+     FROM model_catalog m
+     LEFT JOIN channels c ON c.id = m.channel_id
+     WHERE m.status = "enabled"
+     ORDER BY is_orphan DESC, COALESCE(NULLIF(m.display_name, ""), m.model_id) ASC`
   ).all<any>();
   return json({ models: rows.results || [] });
 }
@@ -526,6 +534,16 @@ async function updateModel(request: Request, env: Env, modelRowId: string): Prom
 async function deleteModel(env: Env, modelRowId: string): Promise<Response> {
   await env.DB.prepare('UPDATE model_catalog SET status = "disabled" WHERE id = ?').bind(modelRowId).run();
   return json({ ok: true, message: '模型已从广场隐藏' });
+}
+
+async function cleanupOrphanModels(env: Env): Promise<Response> {
+  const result: any = await env.DB.prepare(
+    `DELETE FROM model_catalog
+     WHERE channel_id IS NULL
+        OR NOT EXISTS (SELECT 1 FROM channels c WHERE c.id = model_catalog.channel_id)`
+  ).run();
+  const count = Number(result?.meta?.changes || 0);
+  return json({ ok: true, deleted: count, message: `已删除 ${count} 个已删除渠道残留模型` });
 }
 
 async function getAdminSettings(env: Env): Promise<Response> {
@@ -553,6 +571,7 @@ async function updateAdminSettings(request: Request, env: Env): Promise<Response
   for (const key of allowed) {
     if (key in body) updates[key] = body[key];
   }
+  if ('themeName' in body) updates.themeDefaultPinned = true;
   await saveSettings(env, updates);
   return json({ settings: await getSettings(env) });
 }
@@ -607,7 +626,10 @@ async function updateChannel(request: Request, env: Env, channelId: string): Pro
 }
 
 async function deleteChannel(env: Env, channelId: string): Promise<Response> {
-  await env.DB.prepare('DELETE FROM channels WHERE id = ?').bind(channelId).run();
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM model_catalog WHERE channel_id = ?').bind(channelId),
+    env.DB.prepare('DELETE FROM channels WHERE id = ?').bind(channelId)
+  ]);
   return json({ ok: true });
 }
 
@@ -703,6 +725,7 @@ async function requireSession(request: Request, env: Env): Promise<AuthedUser> {
      WHERE s.token_hash = ? AND s.expires_at > datetime('now')`
   ).bind(hash).first<AuthedUser>();
   if (!row || row.status !== 'active') throw new HttpError('登录已过期', 401);
+  await env.DB.prepare('UPDATE sessions SET expires_at = ? WHERE token_hash = ?').bind(plusHours(24 * 180), hash).run();
   return row;
 }
 
@@ -1291,7 +1314,7 @@ async function verifyCaptcha(token: string, env: Env): Promise<void> {
 async function createSession(env: Env, userId: string): Promise<string> {
   const raw = `sess_${randomToken(32)}`;
   await env.DB.prepare('INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)')
-    .bind(id('ses'), userId, await sha256(raw), plusHours(24 * 30)).run();
+    .bind(id('ses'), userId, await sha256(raw), plusHours(24 * 180)).run();
   return raw;
 }
 
@@ -1313,6 +1336,9 @@ async function getSettings(env: Env): Promise<Record<string, any>> {
   const merged = { ...defaultPublicSettings, ...settings };
   if (!Object.prototype.hasOwnProperty.call(settings, 'emailVerificationEnabled')) {
     merged.emailVerificationEnabled = merged.appMode === 'multi';
+  }
+  if (!Object.prototype.hasOwnProperty.call(settings, 'themeDefaultPinned')) {
+    merged.themeName = defaultPublicSettings.themeName;
   }
   return merged;
 }
