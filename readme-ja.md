@@ -31,17 +31,17 @@ Only API は、Cloudflare Workers + Pages にデプロイできる OpenAI 互換
 ## 主な機能
 
 - `ADMIN_SETUP_SECRET` による初回スーパー管理者作成。
-- 個人利用モードと複数ユーザーモード。
-- 登録の有効化、メールコード認証、確認パスワード、メールドメイン検証、QQ メールの数字プレフィックス検証。
+- 登録、メールコード認証、メールドメイン検証、QQ メール数字プレフィックス検証、Turnstile は個別に切り替えでき、既定ではすべて無効です。
 - 任意の Cloudflare Turnstile。フロントエンド Site Key は Pages 変数、バックエンド Secret Key は Worker 変数に設定します。
-- ユーザー API Key は `oi-only-` プレフィックスを使います。
+- ユーザー API Key は `oi-only-` プレフィックスを使い、完全表示、コピー、削除に対応します。
 - OpenAI 互換 `/v1/*` 転送。
 - ユーザーごとの利用上限は設定しません。
-- チャネルテストと上流 `/models` からのモデル同期。
-- モデル広場は 1 行に 1 モデルを表示し、表示名の編集と非表示化ができます。
+- チャネルごとのテストで複数の補完 URL を順に確認し、成功 URL と遅延を記録して、上流 `/models` からモデルを同期します。
+- モデル広場は 1 行に 1 モデルを表示し、折りたたみ、表示名編集、チャネル単位の一括追加/削除、`-all` による全削除、残存モデル整理に対応します。
+- 管理者はユーザーの状態と権限を変更して一般ユーザーを削除できます。現在のユーザーとスーパー管理者は削除できません。
 - 3 時間、1 日、7 日、15 日、全期間の利用統計。
 - Workers 利用量ページは使用済み割合と残り割合を表示します。
-- Workers 利用量は既定で 6 時間ごとに取得し、Telegram または WxPusher へ通知できます。
+- Worker Cron Trigger の設定後、Workers 利用量は既定で 6 時間ごとに取得し、Telegram または WxPusher へ通知できます。
 - Pages フロントエンドと Worker バックエンドを別々に Umami 統計へ接続できます。
 - フロントエンドの時刻表示は UTC+8 に補正されます。
 - 黒白、淡い青白、黄紫、緑赤、ピンク橙のテーマ。
@@ -59,7 +59,7 @@ Worker のビルド設定：
 | ビルドコマンド | `npm ci` |
 | デプロイコマンド | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
 
-`--keep-vars` は、Cloudflare ダッシュボードで設定した変数とシークレットを保持するための指定です。更新後に変数や D1 バインドが消えた場合は、新しい Worker ではなく同じ Worker を再デプロイしているか確認し、Worker のバインド画面をもう一度確認してください。
+`--keep-vars` が維持するのはダッシュボードの通常環境変数です。シークレットは Cloudflare が別に維持しますが、このオプションは D1 バインディングを宣言または保証しません。このリポジトリは Wrangler 設定ファイルを使わないため、常に同じ Worker 名へデプロイし、更新のたびに `DB` バインディングを確認してください。消えていた場合は新しいデータベースを作らず、既存の D1 を再バインドします。
 
 ## デプロイ 2：D1 データベースを作成
 
@@ -105,18 +105,19 @@ Worker 設定で D1 をバインドします：
 | --- | --- | --- |
 | D1 database | `DB` | 作成した D1 データベース |
 
-必須 Worker 変数：
+初回設定に必須の Worker 変数：
 
 | 名前 | 種類 | 用途 |
 | --- | --- | --- |
-| `APP_ORIGIN` | 変数 | Pages フロントエンド URL |
 | `ADMIN_SETUP_SECRET` | シークレット | 初回スーパー管理者作成用パスワード |
-| `JWT_SECRET` | シークレット | セッション用の長いランダム文字列 |
+
+スーパー管理者作成後は設定フローが `ADMIN_SETUP_SECRET` を読まないため、削除または変更できます。
 
 推奨 Worker 変数：
 
 | 名前 | 種類 | 用途 |
 | --- | --- | --- |
+| `APP_ORIGIN` | 変数 | CORS を制限する Pages URL。未設定時は `*` |
 | `API_PUBLIC_BASE_URL` | 変数 | フロントエンドに表示する公開 Worker URL |
 
 任意のメール変数：
@@ -126,11 +127,15 @@ Worker 設定で D1 をバインドします：
 | `RESEND_API_KEY` | シークレット | Resend API Key |
 | `RESEND_FROM` | 変数 | 送信者、例 `Only API <noreply@example.com>` |
 
+メール認証を有効にする場合は、この 2 つを両方設定する必要があります。
+
 任意の Turnstile Worker 変数：
 
 | 名前 | 種類 | 用途 |
 | --- | --- | --- |
 | `TURNSTILE_SECRET_KEY` | シークレット | Cloudflare Turnstile Secret Key |
+
+Turnstile を有効にする場合は、この Worker シークレットと Pages 変数 `VITE_TURNSTILE_SITE_KEY` の両方が必要です。
 
 任意の Workers 利用量変数：
 
@@ -168,9 +173,9 @@ WxPusher 通知変数：
 | `WXPUSHER_UIDS` | 変数 | カンマ区切り UID。Topic を使わない場合は必須 |
 | `WXPUSHER_TOPIC_IDS` | 変数 | カンマ区切り Topic ID。UID を使わない場合は必須 |
 
-任意のスケジュールトリガー：
+自動確認と自動通知に必要なスケジュールトリガー：
 
-Cloudflare ダッシュボードで Worker Cron Trigger を追加できます。例として 1 時間ごとに実行します。アプリ側は設定された間隔に達した場合だけ Workers 利用量を取得します。既定間隔は 360 分です。
+チャネルの自動確認、Workers 利用量の自動取得、自動通知を使う場合は、Cloudflare ダッシュボードで Worker Cron Trigger を追加する必要があります。推奨式は `0 * * * *`（毎時）です。トリガーは Worker を起動し、アプリが設定間隔を確認します。チャネル確認は既定 60 分、Workers 利用量取得は既定 360 分です。自動通知には「Workers 利用量を通知」を有効にし、Telegram または WxPusher の設定も必要です。
 
 ## デプロイ 4：Pages フロントエンドをデプロイ
 
@@ -184,7 +189,8 @@ Pages のビルド設定：
 | ルートディレクトリ | 空欄または `/` |
 | ビルドコマンド | `npm ci && npm run build:web` |
 | ビルド出力ディレクトリ | `apps/web/dist` |
-| Node.js バージョン | `20` 以上 |
+
+Cloudflare で Node.js ビルドバージョンの指定が必要な場合は、Pages ビルド変数 `NODE_VERSION=20` を追加します。
 
 必須 Pages 変数：
 
@@ -214,9 +220,8 @@ Pages フロントエンド URL を開くと、初回のみ設定ページが表
 - スーパー管理者メールアドレス
 - スーパー管理者パスワード
 - サイト名
-- 個人利用モードまたは複数ユーザーモード
 
-スーパー管理者作成後、設定ページは閉じられ、フロントエンドの初期設定フローでは管理者シークレットを使わなくなります。
+スーパー管理者作成後、設定ページは閉じられ、初期設定フローでは管理者シークレットを使わなくなります。登録、メール認証、メールドメイン検証、QQ メール数字プレフィックス検証、Turnstile、Workers 利用量通知、Umami は既定ですべて無効です。
 
 ## 登録認証
 
@@ -225,15 +230,15 @@ Pages フロントエンド URL を開くと、初回のみ設定ページが表
 - コードの有効期限は 13 分です。
 - 1 つのコードにつき 3 回まで入力できます。
 - 再送信の待ち時間は 67 秒です。
-- 個人利用モードではメール認証は既定で無効です。
-- 複数ユーザーモードではメール認証は既定で有効です。
-- メールドメイン検証と QQ メール数字プレフィックス検証は既定で有効です。
+- 登録、メール認証、メールドメイン検証、QQ メール数字プレフィックス検証は既定ですべて無効です。
+- ドメイン検証を有効にすると、`qq.com`、`163.com`、`gmail.com`、`outlook.com`、`yeah.net`、`hotmail.com`、`126.com`、`foxmail.com`、`icloud.com`、`yahoo.com`、`sina.com`、`live.com` のみ許可されます。
+- QQ 数字プレフィックス検証を有効にすると、`qq.com` の `@` より前は数字だけである必要があります。
 
 ## Umami 統計
 
 フロントエンド Umami は Pages コンソールへのアクセスを計測します。システム設定で入力するか、Pages 変数 `VITE_UMAMI_SCRIPT_URL`、`VITE_UMAMI_WEBSITE_ID`、`VITE_UMAMI_HOST_URL` を使います。
 
-バックエンド Umami は Worker リクエストを `backend_request` イベントとして計測します。システム設定で入力するか、Worker 変数 `UMAMI_BACKEND_ENABLED`、`UMAMI_BACKEND_HOST_URL`、`UMAMI_BACKEND_WEBSITE_ID`、`UMAMI_BACKEND_HOSTNAME` を使います。
+バックエンド Umami は公式 `POST /api/send` へ `backend_request` イベントを送信します。システム設定または Worker 変数で設定でき、有効時は Website ID が必須です。システム設定の保存・テストボタンは `umami_test` イベントを送信します。
 
 バックエンド統計はユーザーのメール、API Key、リクエスト本文を送信しません。送信するのはルート分類、メソッド、ステータスコード、処理時間だけです。
 
@@ -250,7 +255,7 @@ Workers 利用量監視には Cloudflare アカウント ID と API Token 変数
 
 割合は、直近 24 時間の Worker リクエスト数を `WORKERS_DAILY_REQUEST_LIMIT` で割って計算します。既定値は `100000` です。
 
-自動取得は既定で 6 時間ごとです。「今すぐ取得」をクリックすると、Telegram または WxPusher 変数が設定されている場合はすぐに通知も送信します。
+自動取得は既定で 6 時間ごとで、前述の Worker Cron Trigger が必要です。自動通知には「Workers 利用量を通知」の有効化も必要です。「今すぐ取得」は自動通知が無効でも、Telegram または WxPusher が設定済みなら直ちに通知します。
 
 ## API の使い方
 
@@ -285,7 +290,11 @@ Model: モデル広場からコピーしたモデル名
 | OpenRouter | `https://openrouter.ai/api/v1` |
 | その他の互換サービス | 通常は `https://domain/v1` |
 
-バックエンドは `/v1`、`/v1/`、`/v1/chat`、`/v1/chat/completions` などの一般的な末尾を自動補正します。
+チャネルテストは標準 `/v1/chat/completions` を作成した後、一般的な末尾の組み合わせと最後に元 URL を試します。成功した完全 URL と遅延を保存し、以後の補完リクエストで利用します。モデル同期は引き続き Base URL と `/v1/models` を使います。
+
+モデル広場では、選択した 1 チャネルに対してモデルを一括追加または非表示化できます。一括削除で `-all` を入力すると、そのチャネルの全モデルを非表示にします。名前を一括追加すれば再び有効化できます。残存モデル整理は削除済みチャネルのモデル記録を削除します。
+
+新しい API Key は完全表示され、コピーと削除ができます。旧版で平文を保存していない Key は復元できないため、プレフィックスしか表示されない場合は新しい Key を作成してください。管理者は一般ユーザーを削除できますが、現在のアカウントとスーパー管理者は削除できません。
 
 ## トラブルシューティング
 
@@ -295,7 +304,7 @@ Model: モデル広場からコピーしたモデル名
 2. Pages URL ではなく Worker URL を指定しているか確認します。
 3. Pages 変数を変更した後は Pages を再デプロイします。
 4. Worker バインド `DB` を確認します。
-5. Worker 変数 `APP_ORIGIN`、`ADMIN_SETUP_SECRET`、`JWT_SECRET` を確認します。
+5. Worker の `DB` バインディングと `APP_ORIGIN` を確認します。初回設定時は `ADMIN_SETUP_SECRET` も確認します。
 
 SillyTavern が Unauthorized を表示する場合：
 

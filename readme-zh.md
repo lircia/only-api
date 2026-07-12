@@ -32,17 +32,17 @@ Only API 是一个可部署到 Cloudflare Workers + Pages 的 OpenAI 兼容 API 
 ## 主要功能
 
 - 使用 `ADMIN_SETUP_SECRET` 完成首次超级管理员初始化。
-- 支持自用配置和多人配置。
-- 支持开放注册、邮箱验证码注册、确认密码、邮箱后缀验证、QQ 邮箱数字前缀验证。
+- 开放注册、邮箱验证码、邮箱后缀验证、QQ 邮箱数字前缀验证和人机验证均可独立开启，默认全部关闭。
 - 支持可选 Cloudflare Turnstile。前端 Site Key 填到 Pages 变量，后端 Secret Key 填到 Worker 变量。
-- 用户 API Key 使用 `oi-only-` 前缀。
+- 用户 API Key 使用 `oi-only-` 前缀，支持完整显示、复制和删除。
 - 支持 OpenAI 兼容 `/v1/*` 转发。
 - 不做用户额度限制。
-- 支持渠道测试，并从上游 `/models` 同步模型。
-- 模型广场一行显示一个模型，可修改显示名，也可隐藏模型。
+- 每个渠道可单独测试，自动轮询多种补全地址，记录成功调用 URL 和延迟，并从上游 `/models` 同步模型。
+- 模型广场一行显示一个模型，支持折叠、修改显示名、按渠道批量添加/删除、使用 `-all` 删除全部以及清理残留模型。
+- 管理员可修改用户状态和角色并删除普通用户；当前登录用户和超级管理员受保护，不能删除。
 - 支持 3 小时、1 日、7 日、15 日和总览用量统计。
 - Workers 用量页显示已用百分比和剩余百分比。
-- Workers 用量默认每 6 小时采集一次，并可推送到 Telegram 或 WxPusher。
+- 配置 Worker Cron Trigger 后，Workers 用量默认每 6 小时采集一次，并可推送到 Telegram 或 WxPusher。
 - 支持前端 Pages 和后端 Worker 分别接入 Umami 统计。
 - 前端时间统一按 UTC+8 显示。
 - 内置黑白、浅蓝白、黄紫、绿红、粉橙主题。
@@ -60,7 +60,7 @@ Worker 构建设置：
 | 构建命令 | `npm ci` |
 | 部署命令 | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
 
-`--keep-vars` 用来尽量保留你在控制台里设置的变量和密钥。如果更新后变量或 D1 绑定消失，请确认你部署的是同一个 Worker，而不是新建了另一个 Worker，然后到 Worker 绑定页面重新检查。
+`--keep-vars` 只用于保留控制台中的普通环境变量；密钥由 Cloudflare 单独保留，但该参数不会声明或保证 D1 绑定。本仓库按要求不使用 Wrangler 配置文件，因此必须始终部署到同名 Worker，并在每次更新 Worker 后检查 `DB` 绑定。若绑定丢失，请重新绑定原来的 D1 数据库，不要新建数据库。
 
 ## 部署 2：创建 D1 数据库
 
@@ -106,18 +106,19 @@ SQL 会创建这些表：
 | --- | --- | --- |
 | D1 数据库 | `DB` | 你的 D1 数据库 |
 
-Worker 必要变量：
+首次初始化必要的 Worker 变量：
 
 | 名称 | 类型 | 用途 |
 | --- | --- | --- |
-| `APP_ORIGIN` | 变量 | Pages 前端地址 |
 | `ADMIN_SETUP_SECRET` | 密钥 | 首次创建超级管理员的密码 |
-| `JWT_SECRET` | 密钥 | 登录会话使用的长随机字符串 |
+
+超级管理员创建完成后，初始化流程不再读取 `ADMIN_SETUP_SECRET`，可以删除或更换它。
 
 推荐 Worker 变量：
 
 | 名称 | 类型 | 用途 |
 | --- | --- | --- |
+| `APP_ORIGIN` | 变量 | Pages 前端地址，用于限制 CORS；不填时会退回 `*` |
 | `API_PUBLIC_BASE_URL` | 变量 | 前端显示的 Worker 公共地址 |
 
 可选邮箱变量：
@@ -127,11 +128,15 @@ Worker 必要变量：
 | `RESEND_API_KEY` | 密钥 | Resend API Key |
 | `RESEND_FROM` | 变量 | 发件人，例如 `Only API <noreply@example.com>` |
 
+开启邮箱验证时，这两个邮件变量必须同时配置。
+
 可选 Turnstile 后端变量：
 
 | 名称 | 类型 | 用途 |
 | --- | --- | --- |
 | `TURNSTILE_SECRET_KEY` | 密钥 | Cloudflare Turnstile Secret Key |
+
+开启人机验证时，必须同时配置这个 Worker 密钥和 Pages 变量 `VITE_TURNSTILE_SITE_KEY`。
 
 可选 Workers 用量变量：
 
@@ -169,9 +174,9 @@ WxPusher 推送变量：
 | `WXPUSHER_UIDS` | 变量 | 用英文逗号分隔的 UID，未使用 Topic 时必填 |
 | `WXPUSHER_TOPIC_IDS` | 变量 | 用英文逗号分隔的 Topic ID，未使用 UID 时必填 |
 
-可选定时触发器：
+自动检测和自动推送所需的定时触发器：
 
-可以在 Cloudflare 控制台给 Worker 添加 Cron Trigger，例如每小时运行一次。项目会自己判断是否到达设置的采集间隔，默认间隔是 360 分钟。
+需要自动检测渠道、自动采集 Workers 用量或自动推送时，必须在 Cloudflare 控制台为 Worker 添加 Cron Trigger。推荐表达式为 `0 * * * *`（每小时触发一次）。每次触发只负责唤醒 Worker，代码会自行判断设置的间隔是否已经到达：渠道检测默认 60 分钟，Workers 用量采集默认 360 分钟。自动推送还需要在系统设置中开启“推送 Workers 用量”，并配置 Telegram 或 WxPusher 变量。
 
 ## 部署 4：部署 Pages 前端
 
@@ -185,7 +190,8 @@ Pages 构建设置：
 | 根目录 | 留空或 `/` |
 | 构建命令 | `npm ci && npm run build:web` |
 | 构建输出目录 | `apps/web/dist` |
-| Node.js 版本 | `20` 或更高 |
+
+如果 Cloudflare 要求指定 Node.js 构建版本，请添加 Pages 构建变量 `NODE_VERSION=20`。
 
 Pages 必要变量：
 
@@ -215,9 +221,8 @@ Pages 部署完成后，把 Worker 变量 `APP_ORIGIN` 设置为 Pages 前端地
 - 超级管理员邮箱
 - 超级管理员密码
 - 站点名称
-- 自用配置或多人配置
 
-超级管理员创建完成后，初始化页面会关闭，前端初始化流程不再使用管理员密钥。
+超级管理员创建完成后，初始化页面会关闭，前端初始化流程不再使用管理员密钥。开放注册、邮箱验证、邮箱后缀验证、QQ 邮箱数字前缀验证、人机验证、Workers 用量推送和 Umami 默认全部关闭，请在系统设置中只开启需要的项目。
 
 ## 注册验证
 
@@ -226,15 +231,15 @@ Pages 部署完成后，把 Worker 变量 `APP_ORIGIN` 设置为 Pages 前端地
 - 验证码有效期 13 分钟。
 - 每个验证码最多输入 3 次。
 - 重新发送冷却时间 67 秒。
-- 自用配置默认关闭邮箱验证。
-- 多人配置默认开启邮箱验证。
-- 邮箱后缀验证和 QQ 邮箱数字前缀验证默认开启。
+- 开放注册、邮箱验证、邮箱后缀验证和 QQ 邮箱数字前缀验证默认全部关闭。
+- 开启邮箱后缀验证后，只允许 `qq.com`、`163.com`、`gmail.com`、`outlook.com`、`yeah.net`、`hotmail.com`、`126.com`、`foxmail.com`、`icloud.com`、`yahoo.com`、`sina.com`、`live.com`。
+- 开启 QQ 邮箱数字前缀验证后，`qq.com` 地址的 `@` 前必须全部为数字。
 
 ## Umami 统计
 
 前端 Umami 用于统计 Pages 控制台访问。可以在系统设置中填写，也可以使用 Pages 变量 `VITE_UMAMI_SCRIPT_URL`、`VITE_UMAMI_WEBSITE_ID`、`VITE_UMAMI_HOST_URL`。
 
-后端 Umami 用于统计 Worker 请求，会发送 `backend_request` 事件。可以在系统设置中填写，也可以使用 Worker 变量 `UMAMI_BACKEND_ENABLED`、`UMAMI_BACKEND_HOST_URL`、`UMAMI_BACKEND_WEBSITE_ID`、`UMAMI_BACKEND_HOSTNAME`。
+后端 Umami 通过官方 `POST /api/send` 接口发送 `backend_request` 事件。可以在系统设置中填写，也可以使用 Worker 变量 `UMAMI_BACKEND_ENABLED`、`UMAMI_BACKEND_HOST_URL`、`UMAMI_BACKEND_WEBSITE_ID`、`UMAMI_BACKEND_HOSTNAME`。启用后端统计时必须配置 Website ID；系统设置中还提供“保存并测试后端 Umami”按钮，测试会发送 `umami_test` 事件。
 
 后端统计不会发送用户邮箱、API Key 或请求正文，只发送路径类别、请求方法、状态码和耗时。
 
@@ -251,7 +256,7 @@ Workers 用量监测需要 Cloudflare 账号 ID 和 API Token 变量。缺少变
 
 百分比按最近 24 小时 Worker 请求量除以 `WORKERS_DAILY_REQUEST_LIMIT` 计算。默认额度是 `100000`。
 
-自动采集默认每 6 小时一次。点击“立即采集”时，如果已经配置 Telegram 或 WxPusher 变量，也会立即同步推送。
+自动采集默认每 6 小时一次，并且必须配置前文所述的 Worker Cron Trigger。自动推送还必须开启“推送 Workers 用量”。点击“立即采集”时，只要已经配置 Telegram 或 WxPusher 变量，即使自动推送开关关闭也会立即推送。
 
 ## API 使用
 
@@ -286,7 +291,11 @@ API Key：完整的 oi-only-... 密钥
 | OpenRouter | `https://openrouter.ai/api/v1` |
 | 其他兼容服务 | 通常是 `https://domain/v1` |
 
-后端会自动修正常见后缀，例如 `/v1`、`/v1/`、`/v1/chat`、`/v1/chat/completions`。
+单独测试渠道时，后端会先生成标准 `/v1/chat/completions` 地址，再轮询常见后缀组合，最后尝试原始地址。测试成功后会记录完整调用 URL 和延迟，之后的补全请求使用这个成功地址。模型同步仍使用渠道 Base URL 加 `/v1/models`。
+
+管理员可以在模型广场中为选中的单个渠道批量添加或隐藏模型。批量删除时输入 `-all` 会隐藏该渠道的全部模型；之后批量添加模型名可以重新启用。清理残留模型功能会删除已经被删除渠道所留下的模型记录。
+
+新建 API Key 会完整显示，并可复制或删除。旧版本创建且没有保存明文的 Key 无法恢复完整内容，只显示前缀时请创建新 Key。管理员可以删除普通用户，但不能删除当前登录账号或超级管理员账号。
 
 ## 排错
 
@@ -296,7 +305,7 @@ API Key：完整的 oi-only-... 密钥
 2. 确认它填写的是 Worker 地址，不是 Pages 地址。
 3. 修改 Pages 变量后重新部署 Pages。
 4. 检查 Worker 绑定 `DB`。
-5. 检查 Worker 变量 `APP_ORIGIN`、`ADMIN_SETUP_SECRET`、`JWT_SECRET`。
+5. 检查 Worker 的 `DB` 绑定和 `APP_ORIGIN`；首次初始化时还要检查 `ADMIN_SETUP_SECRET`。
 
 如果 SillyTavern 显示 Unauthorized：
 

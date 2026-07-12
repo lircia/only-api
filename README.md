@@ -31,17 +31,17 @@ This repository is designed for GitHub hosting and Cloudflare dashboard deployme
 ## Main Features
 
 - First super-admin setup with `ADMIN_SETUP_SECRET`.
-- Self-use mode and multi-user mode.
-- Registration switch, email-code verification, confirm password, email suffix validation, and numeric QQ email prefix validation.
+- Independent switches for registration, email-code verification, email suffix validation, numeric QQ email prefix validation, and Turnstile. All are disabled by default.
 - Optional Cloudflare Turnstile. The frontend Site Key is a Pages variable, and the backend Secret Key is a Worker variable.
-- User API keys use the `oi-only-` prefix.
+- User API keys use the `oi-only-` prefix and support full display, copying, and deletion.
 - OpenAI-compatible `/v1/*` forwarding.
 - No user quota enforcement.
-- Channel testing and model syncing from upstream `/models`.
-- Model Square with one model per row, editable display names, and hidden models.
+- Per-channel health tests probe several completion URL suffixes, record the working URL and latency, and sync models from upstream `/models`.
+- Model Square with one model per row, folding, editable display names, per-channel batch add/delete, `-all` delete-all, and orphan cleanup.
+- Admin user status/role editing and user deletion, with protection for the current user and super admin.
 - Usage statistics for 3 hours, 1 day, 7 days, 15 days, and all time.
 - Workers usage monitoring shows used percent and remaining percent.
-- Workers usage is checked every 6 hours by default and can be pushed to Telegram or WxPusher.
+- With a Worker Cron Trigger, Workers usage is checked every 6 hours by default and can be pushed to Telegram or WxPusher.
 - Optional Umami analytics for the Pages frontend and Worker backend.
 - Frontend time display is adjusted to UTC+8.
 - Built-in themes: black-white, light blue-white, yellow-purple, green-red, and pink-orange.
@@ -59,7 +59,7 @@ Use these Worker build settings:
 | Build command | `npm ci` |
 | Deploy command | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
 
-`--keep-vars` helps preserve Worker variables and secrets. If your variables or D1 binding disappear after an update, make sure you are redeploying the same Worker, not creating a new Worker, then recheck the Worker bindings page.
+`--keep-vars` preserves dashboard environment variables. Secrets are preserved separately, but this flag does not declare or guarantee the D1 binding. Because this repository intentionally has no Wrangler configuration file, deploy the same Worker name and verify the `DB` binding after every Worker update. If the binding is missing, bind the existing D1 database again; do not create a new database.
 
 ## Deployment 2: Create D1 Database
 
@@ -105,18 +105,19 @@ Bind the D1 database in Worker settings:
 | --- | --- | --- |
 | D1 database | `DB` | your D1 database |
 
-Required Worker variables:
+Required Worker variable for first setup:
 
 | Name | Type | Purpose |
 | --- | --- | --- |
-| `APP_ORIGIN` | Variable | Your Pages frontend URL |
 | `ADMIN_SETUP_SECRET` | Secret | Password for first super-admin setup |
-| `JWT_SECRET` | Secret | Long random session secret |
 
-Recommended Worker variable:
+After the super admin exists, `ADMIN_SETUP_SECRET` is no longer read by the setup flow and may be removed or rotated.
+
+Recommended Worker variables:
 
 | Name | Type | Purpose |
 | --- | --- | --- |
+| `APP_ORIGIN` | Variable | Your Pages frontend URL; restricts CORS to this origin. Without it, CORS falls back to `*` |
 | `API_PUBLIC_BASE_URL` | Variable | Public Worker URL shown in the frontend |
 
 Optional email variables:
@@ -126,11 +127,15 @@ Optional email variables:
 | `RESEND_API_KEY` | Secret | Resend API key |
 | `RESEND_FROM` | Variable | Sender, for example `Only API <noreply@example.com>` |
 
+Both email variables are required when email verification is enabled.
+
 Optional Turnstile Worker variable:
 
 | Name | Type | Purpose |
 | --- | --- | --- |
 | `TURNSTILE_SECRET_KEY` | Secret | Cloudflare Turnstile Secret Key |
+
+When Turnstile is enabled, this Worker secret and the Pages variable `VITE_TURNSTILE_SITE_KEY` are both required.
 
 Optional Workers usage variables:
 
@@ -168,9 +173,9 @@ WxPusher notification variables:
 | `WXPUSHER_UIDS` | Variable | Comma-separated UID list, required unless topic IDs are used |
 | `WXPUSHER_TOPIC_IDS` | Variable | Comma-separated topic ID list, required unless UIDs are used |
 
-Optional scheduled trigger:
+Scheduled trigger for automatic checks and notifications:
 
-Add a Worker Cron Trigger in the Cloudflare dashboard. For example, run every hour. The app itself only performs the Workers usage query when the configured interval has passed. The default interval is 360 minutes.
+Add a Worker Cron Trigger in the Cloudflare dashboard if you need automatic channel checks, Workers usage collection, or automatic usage notifications. The recommended cron expression is `0 * * * *` (once per hour). Each trigger wakes the Worker; the app then checks whether the configured interval has elapsed. Channel checks default to 60 minutes and Workers usage collection defaults to 360 minutes. Automatic notifications additionally require “Notify Workers usage” to be enabled and Telegram or WxPusher variables to be configured.
 
 ## Deployment 4: Deploy Pages Frontend
 
@@ -184,7 +189,8 @@ Use these Pages build settings:
 | Root directory | blank or `/` |
 | Build command | `npm ci && npm run build:web` |
 | Build output directory | `apps/web/dist` |
-| Node.js version | `20` or higher |
+
+If Cloudflare asks for a Node.js build version, add the Pages build variable `NODE_VERSION=20`.
 
 Required Pages variable:
 
@@ -214,9 +220,8 @@ You need:
 - super-admin email
 - super-admin password
 - site name
-- self-use mode or multi-user mode
 
-After the super admin is created, the setup page closes and the setup secret is no longer used by the frontend setup flow.
+After the super admin is created, the setup page closes and the setup secret is no longer used by the frontend setup flow. Registration, email verification, email suffix validation, numeric QQ email prefix validation, Turnstile, Workers usage notifications, and Umami are all disabled by default; enable only the switches you need in System Settings.
 
 ## Registration Verification
 
@@ -225,15 +230,15 @@ When email verification is enabled, registration sends a 13-digit numeric code b
 - The code is valid for 13 minutes.
 - Each code allows 3 attempts.
 - Resend cooldown is 67 seconds.
-- Self-use mode defaults email verification to off.
-- Multi-user mode defaults email verification to on.
-- Email suffix validation and numeric QQ email prefix validation are enabled by default.
+- Registration, email verification, email suffix validation, and numeric QQ email prefix validation are all disabled by default.
+- When email suffix validation is enabled, allowed domains are `qq.com`, `163.com`, `gmail.com`, `outlook.com`, `yeah.net`, `hotmail.com`, `126.com`, `foxmail.com`, `icloud.com`, `yahoo.com`, `sina.com`, and `live.com`.
+- When numeric QQ email prefix validation is enabled, a `qq.com` address must use digits before `@`.
 
 ## Umami Analytics
 
 Frontend Umami tracks visits to the Pages console. Configure it in System Settings, or use Pages variables `VITE_UMAMI_SCRIPT_URL`, `VITE_UMAMI_WEBSITE_ID`, and `VITE_UMAMI_HOST_URL`.
 
-Backend Umami tracks Worker requests as `backend_request` events. Configure it in System Settings, or use Worker variables `UMAMI_BACKEND_ENABLED`, `UMAMI_BACKEND_HOST_URL`, `UMAMI_BACKEND_WEBSITE_ID`, and `UMAMI_BACKEND_HOSTNAME`.
+Backend Umami sends `backend_request` events through the official `POST /api/send` endpoint. Configure it in System Settings, or use Worker variables `UMAMI_BACKEND_ENABLED`, `UMAMI_BACKEND_HOST_URL`, `UMAMI_BACKEND_WEBSITE_ID`, and `UMAMI_BACKEND_HOSTNAME`. The backend Website ID is required when tracking is enabled. System Settings also provides a save-and-test button that sends an `umami_test` event.
 
 Backend tracking does not send user email, API keys, or request bodies. It only sends route category, method, status code, and latency.
 
@@ -250,7 +255,7 @@ The page displays:
 
 The percent is calculated from the last 24 hours of Worker requests divided by `WORKERS_DAILY_REQUEST_LIMIT`. The default limit is `100000`.
 
-Automatic checks default to every 6 hours. Clicking “collect now” also sends a notification immediately if Telegram or WxPusher variables are configured.
+Automatic collection defaults to every 6 hours and requires the Worker Cron Trigger described above. Automatic push also requires “Notify Workers usage” to be enabled. Clicking “collect now” sends a notification immediately whenever Telegram or WxPusher variables are configured, even if automatic push is disabled.
 
 ## API Usage
 
@@ -285,7 +290,11 @@ Use the upstream API root at the version level.
 | OpenRouter | `https://openrouter.ai/api/v1` |
 | Other compatible providers | usually `https://domain/v1` |
 
-The backend normalizes common suffixes such as `/v1`, `/v1/`, `/v1/chat`, and `/v1/chat/completions`.
+The per-channel test first builds a normal `/v1/chat/completions` URL, then probes common suffix combinations and finally the original URL. After success it records the exact working completion URL and latency, and gateway completion requests use that recorded URL. Model synchronization still uses the channel Base URL plus `/v1/models`.
+
+In Model Square, administrators can batch add or hide model names for one selected channel. During batch deletion, enter `-all` to hide every model belonging to that channel. Hidden models can be enabled again by batch adding their names. The orphan cleanup action removes model records left by deleted channels.
+
+New API keys are displayed in full and can be copied or deleted. Keys created by older versions before plaintext storage cannot be recovered; create a new key if an old key only shows its prefix. Administrators can delete ordinary users, but cannot delete the currently logged-in account or a super-admin account.
 
 ## Troubleshooting
 
@@ -295,7 +304,7 @@ If the frontend cannot connect:
 2. Make sure it points to the Worker URL, not the Pages URL.
 3. Redeploy Pages after changing Pages variables.
 4. Check Worker binding `DB`.
-5. Check Worker variables `APP_ORIGIN`, `ADMIN_SETUP_SECRET`, and `JWT_SECRET`.
+5. Check the Worker `DB` binding and `APP_ORIGIN`. During first setup, also check `ADMIN_SETUP_SECRET`.
 
 If SillyTavern says Unauthorized:
 

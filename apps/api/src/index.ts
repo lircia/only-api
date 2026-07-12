@@ -1,9 +1,8 @@
 export interface Env {
   DB: D1Database;
   CACHE?: KVNamespace;
-  APP_ORIGIN: string;
-  ADMIN_SETUP_SECRET: string;
-  JWT_SECRET: string;
+  APP_ORIGIN?: string;
+  ADMIN_SETUP_SECRET?: string;
   RESEND_API_KEY?: string;
   RESEND_FROM?: string;
   TURNSTILE_SECRET_KEY?: string;
@@ -203,6 +202,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (method === 'PATCH' && path.startsWith('/api/admin/models/')) return updateModel(request, env, path.split('/').pop() || '');
   if (method === 'DELETE' && path.startsWith('/api/admin/models/')) return deleteModel(env, path.split('/').pop() || '');
   if (method === 'POST' && path === '/api/admin/notify-test') return testNotification(request, env);
+  if (method === 'POST' && path === '/api/admin/umami-test') return testBackendUmami(env);
 
   return json({ error: '接口不存在' }, 404);
 }
@@ -605,6 +605,13 @@ async function batchModels(request: Request, env: Env): Promise<Response> {
   if (!models.length) return json({ error: '请填写模型名' }, 400);
 
   if (action === 'delete') {
+    if (models.some((modelId) => modelId.toLowerCase() === '-all')) {
+      const result: any = await env.DB.prepare(
+        'UPDATE model_catalog SET status = "disabled" WHERE channel_id = ? AND status != "disabled"'
+      ).bind(channelId).run();
+      const count = Number(result?.meta?.changes || 0);
+      return json({ ok: true, changed: count, message: `已隐藏该渠道的全部 ${count} 个模型` });
+    }
     const statements = models.map((modelId) =>
       env.DB.prepare('UPDATE model_catalog SET status = "disabled" WHERE channel_id = ? AND (model_id = ? OR display_name = ?)')
         .bind(channelId, modelId, modelId)
@@ -1680,39 +1687,87 @@ async function trackBackendUmami(env: Env, request: Request, response: Response,
     const config = await getCachedBackendUmamiConfig(env);
     if (!config.enabled || !config.websiteId) return;
 
-    const hostUrl = normalizeUmamiHostUrl(config.hostUrl || 'https://cloud.umami.is');
-    if (!hostUrl) return;
-
     const url = new URL(request.url);
+    if (url.pathname === '/api/admin/umami-test') return;
     const route = backendRouteName(url.pathname);
     const latencyMs = Math.max(0, Date.now() - startedAt);
-    await fetch(`${hostUrl}/api/send`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'user-agent': request.headers.get('user-agent') || 'Only API Worker'
-      },
-      body: JSON.stringify({
-        type: 'event',
-        payload: {
-          website: config.websiteId,
-          hostname: config.hostname || url.hostname,
-          language: firstHeaderValue(request.headers.get('accept-language')) || 'zh-CN',
-          referrer: request.headers.get('referer') || '',
-          title: 'Only API Worker',
-          url: route,
-          name: 'backend_request',
-          data: {
-            method: request.method.toUpperCase(),
-            route,
-            status: response.status,
-            latencyMs
-          }
-        }
-      })
-    });
+    await sendBackendUmamiEvent(config, {
+      hostname: config.hostname || url.hostname,
+      language: firstHeaderValue(request.headers.get('accept-language')) || 'zh-CN',
+      referrer: request.headers.get('referer') || '',
+      url: route,
+      name: 'backend_request',
+      data: {
+        method: request.method.toUpperCase(),
+        route,
+        status: response.status,
+        latencyMs
+      }
+    }, request.headers.get('user-agent') || 'Only API Worker');
   } catch {
     // Analytics must never affect API forwarding.
+  }
+}
+
+async function testBackendUmami(env: Env): Promise<Response> {
+  const config = await getCachedBackendUmamiConfig(env);
+  if (!config.websiteId) return json({ error: '请配置后端 Umami Website ID' }, 400);
+  if (!normalizeUmamiHostUrl(config.hostUrl || 'https://cloud.umami.is')) {
+    return json({ error: '请配置有效的后端 Umami Host URL' }, 400);
+  }
+
+  await sendBackendUmamiEvent(config, {
+    hostname: config.hostname || 'only-api-worker',
+    language: 'zh-CN',
+    referrer: '',
+    url: '/api/admin/umami-test',
+    name: 'umami_test',
+    data: {
+      source: 'system_settings',
+      sentAt: new Date().toISOString()
+    }
+  }, 'Only API Worker Umami Test');
+  return json({ ok: true, message: 'Umami 后端测试成功' });
+}
+
+async function sendBackendUmamiEvent(
+  config: BackendUmamiConfig,
+  event: {
+    hostname: string;
+    language: string;
+    referrer: string;
+    url: string;
+    name: string;
+    data: Record<string, string | number | boolean>;
+  },
+  userAgent: string
+): Promise<void> {
+  const hostUrl = normalizeUmamiHostUrl(config.hostUrl || 'https://cloud.umami.is');
+  if (!hostUrl) throw new HttpError('Umami Host URL 无效', 400);
+
+  const result = await fetch(`${hostUrl}/api/send`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'user-agent': userAgent || 'Only API Worker'
+    },
+    body: JSON.stringify({
+      type: 'event',
+      payload: {
+        website: config.websiteId,
+        hostname: event.hostname,
+        language: event.language,
+        referrer: event.referrer,
+        title: 'Only API Worker',
+        url: event.url,
+        name: event.name,
+        data: event.data
+      }
+    })
+  });
+  if (!result.ok) {
+    const detail = (await result.text()).trim().slice(0, 300);
+    throw new HttpError(`Umami 发送失败：${detail || `HTTP ${result.status}`}`, 400);
   }
 }
 

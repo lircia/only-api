@@ -31,17 +31,17 @@ Dieses Repository ist für GitHub-Hosting und Deployment über das Cloudflare-Da
 ## Hauptfunktionen
 
 - Erste Super-Admin-Einrichtung mit `ADMIN_SETUP_SECRET`.
-- Selbstnutzungsmodus und Mehrbenutzermodus.
-- Registrierungsschalter, E-Mail-Code-Verifizierung, Passwortbestätigung, E-Mail-Domain-Prüfung und numerische QQ-Mail-Präfixprüfung.
+- Registrierung, E-Mail-Code-Verifizierung, E-Mail-Domain-Prüfung, numerische QQ-Mail-Präfixprüfung und Turnstile sind einzeln schaltbar und standardmäßig deaktiviert.
 - Optionales Cloudflare Turnstile. Der Frontend Site Key gehört in eine Pages-Variable, der Backend Secret Key in eine Worker-Variable.
-- Benutzer-API-Keys verwenden das Präfix `oi-only-`.
+- Benutzer-API-Keys verwenden das Präfix `oi-only-` und können vollständig angezeigt, kopiert und gelöscht werden.
 - OpenAI-kompatible Weiterleitung für `/v1/*`.
 - Keine Benutzerkontingente.
-- Kanaltests und Modellsynchronisierung über Upstream `/models`.
-- Modellplatz mit einem Modell pro Zeile, editierbaren Anzeigenamen und ausblendbaren Modellen.
+- Einzelne Kanaltests prüfen mehrere Completion-URLs, speichern erfolgreiche URL und Latenz und synchronisieren Modelle über `/models`.
+- Modellplatz mit Faltung, editierbaren Namen, kanalweiser Massenaddition/-löschung, `-all` zum Löschen aller Modelle und Bereinigung verwaister Modelle.
+- Administratoren können Benutzerstatus und Rollen ändern sowie normale Benutzer löschen; aktueller Benutzer und Super-Admin sind geschützt.
 - Nutzungsstatistiken für 3 Stunden, 1 Tag, 7 Tage, 15 Tage und Gesamtansicht.
 - Workers-Nutzung zeigt verwendeten Prozentsatz und verbleibenden Prozentsatz.
-- Workers-Nutzung wird standardmäßig alle 6 Stunden abgefragt und kann an Telegram oder WxPusher gesendet werden.
+- Mit einem Worker Cron Trigger wird die Workers-Nutzung standardmäßig alle 6 Stunden abgefragt und kann an Telegram oder WxPusher gesendet werden.
 - Optionale Umami-Analytik getrennt für Pages-Frontend und Worker-Backend.
 - Zeitangaben im Frontend werden auf UTC+8 angepasst.
 - Eingebaute Themes: Schwarz-Weiß, helles Blau-Weiß, Gelb-Lila, Grün-Rot und Pink-Orange.
@@ -59,7 +59,7 @@ Worker-Build-Einstellungen:
 | Build command | `npm ci` |
 | Deploy command | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
 
-`--keep-vars` hilft, Variablen und Secrets aus dem Cloudflare-Dashboard zu behalten. Wenn Variablen oder die D1-Bindung nach einem Update verschwinden, prüfe, ob du denselben Worker neu bereitstellst und nicht einen neuen Worker erstellst. Prüfe danach die Worker-Bindings erneut.
+`--keep-vars` erhält nur normale Dashboard-Umgebungsvariablen. Geheimnisse bleiben separat erhalten; D1-Bindings werden dadurch weder deklariert noch garantiert. Da dieses Repository absichtlich keine Wrangler-Konfigurationsdatei nutzt, muss immer derselbe Worker-Name verwendet und das `DB`-Binding nach jedem Update geprüft werden. Fehlt es, binde die vorhandene D1-Datenbank erneut ein und erstelle keine neue.
 
 ## Deployment 2: D1-Datenbank erstellen
 
@@ -105,39 +105,44 @@ Binde D1 in den Worker-Einstellungen:
 | --- | --- | --- |
 | D1 database | `DB` | deine D1-Datenbank |
 
-Erforderliche Worker-Variablen:
+Für die erste Einrichtung erforderliche Worker-Variable:
 
 | Name | Typ | Zweck |
 | --- | --- | --- |
-| `APP_ORIGIN` | Variable | URL des Pages-Frontends |
-| `ADMIN_SETUP_SECRET` | Secret | Passwort für die erste Super-Admin-Einrichtung |
-| `JWT_SECRET` | Secret | lange zufällige Zeichenfolge für Sitzungen |
+| `ADMIN_SETUP_SECRET` | Geheimnis | Passwort für die erste Super-Admin-Einrichtung |
 
-Empfohlene Worker-Variable:
+Nach Erstellung des Super-Admins wird `ADMIN_SETUP_SECRET` nicht mehr gelesen und kann entfernt oder geändert werden.
+
+Empfohlene Worker-Variablen:
 
 | Name | Typ | Zweck |
 | --- | --- | --- |
+| `APP_ORIGIN` | Variable | Pages-URL zur CORS-Beschränkung; ohne Wert gilt `*` |
 | `API_PUBLIC_BASE_URL` | Variable | öffentliche Worker-URL, die im Frontend angezeigt wird |
 
 Optionale E-Mail-Variablen:
 
 | Name | Typ | Zweck |
 | --- | --- | --- |
-| `RESEND_API_KEY` | Secret | Resend API Key |
+| `RESEND_API_KEY` | Geheimnis | Resend API Key |
 | `RESEND_FROM` | Variable | Absender, zum Beispiel `Only API <noreply@example.com>` |
+
+Bei aktivierter E-Mail-Verifizierung sind beide E-Mail-Variablen erforderlich.
 
 Optionale Turnstile-Worker-Variable:
 
 | Name | Typ | Zweck |
 | --- | --- | --- |
-| `TURNSTILE_SECRET_KEY` | Secret | Cloudflare Turnstile Secret Key |
+| `TURNSTILE_SECRET_KEY` | Geheimnis | Cloudflare Turnstile Secret Key |
+
+Bei aktiviertem Turnstile sind dieses Worker-Geheimnis und die Pages-Variable `VITE_TURNSTILE_SITE_KEY` erforderlich.
 
 Optionale Workers-Nutzungsvariablen:
 
 | Name | Typ | Zweck |
 | --- | --- | --- |
 | `CF_ACCOUNT_ID` | Variable | Cloudflare Account ID |
-| `CF_API_TOKEN` | Secret | API Token mit Leserechten für Workers-Nutzung |
+| `CF_API_TOKEN` | Geheimnis | API Token mit Leserechten für Workers-Nutzung |
 | `WORKERS_DAILY_REQUEST_LIMIT` | Variable | Tageslimit für die Prozentberechnung, Standard `100000` |
 
 Akzeptierte Aliasnamen sind `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CF_ZONE_ID`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN` und `CLOUDFLARE_TOKEN`.
@@ -157,20 +162,20 @@ Telegram-Benachrichtigungsvariablen:
 
 | Name | Typ | Zweck |
 | --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | Secret | Telegram Bot Token |
+| `TELEGRAM_BOT_TOKEN` | Geheimnis | Telegram Bot Token |
 | `TELEGRAM_CHAT_ID` | Variable | Telegram-Chat-, Gruppen- oder Kanal-ID |
 
 WxPusher-Benachrichtigungsvariablen:
 
 | Name | Typ | Zweck |
 | --- | --- | --- |
-| `WXPUSHER_APP_TOKEN` | Secret | WxPusher AppToken |
+| `WXPUSHER_APP_TOKEN` | Geheimnis | WxPusher AppToken |
 | `WXPUSHER_UIDS` | Variable | kommagetrennte UID-Liste, erforderlich ohne Topic IDs |
 | `WXPUSHER_TOPIC_IDS` | Variable | kommagetrennte Topic-ID-Liste, erforderlich ohne UIDs |
 
-Optionaler Zeitplan:
+Erforderlicher Zeitplan für automatische Prüfungen und Benachrichtigungen:
 
-Du kannst im Cloudflare-Dashboard einen Worker Cron Trigger hinzufügen, zum Beispiel einmal pro Stunde. Die Anwendung führt die Workers-Nutzungsabfrage nur aus, wenn das eingestellte Intervall erreicht ist. Das Standardintervall beträgt 360 Minuten.
+Für automatische Kanalprüfungen, Workers-Nutzungserfassung oder automatische Benachrichtigungen muss im Cloudflare-Dashboard ein Worker Cron Trigger angelegt werden. Empfohlen ist `0 * * * *` (stündlich). Die Anwendung prüft danach die Intervalle: Kanalprüfung standardmäßig 60 Minuten, Workers-Nutzung standardmäßig 360 Minuten. Automatische Benachrichtigungen erfordern zusätzlich den aktivierten Schalter und Telegram- oder WxPusher-Konfiguration.
 
 ## Deployment 4: Pages-Frontend bereitstellen
 
@@ -184,7 +189,8 @@ Pages-Build-Einstellungen:
 | Root directory | leer oder `/` |
 | Build command | `npm ci && npm run build:web` |
 | Build output directory | `apps/web/dist` |
-| Node.js version | `20` oder höher |
+
+Falls Cloudflare eine Node.js-Buildversion verlangt, füge die Pages-Buildvariable `NODE_VERSION=20` hinzu.
 
 Erforderliche Pages-Variable:
 
@@ -214,9 +220,8 @@ Du benötigst:
 - Super-Admin-E-Mail
 - Super-Admin-Passwort
 - Seitenname
-- Selbstnutzungsmodus oder Mehrbenutzermodus
 
-Nach Erstellung des Super-Admins wird die Einrichtungsseite geschlossen, und der Admin-Secret wird im Frontend-Einrichtungsfluss nicht mehr verwendet.
+Nach Erstellung des Super-Admins wird die Einrichtungsseite geschlossen. Registrierung, E-Mail-Verifizierung, Domain- und QQ-Prüfung, Turnstile, Workers-Benachrichtigungen und Umami sind standardmäßig deaktiviert.
 
 ## Registrierungsverifizierung
 
@@ -225,15 +230,15 @@ Wenn E-Mail-Verifizierung aktiviert ist, sendet die Registrierung keinen Link, s
 - Der Code ist 13 Minuten gültig.
 - Jeder Code erlaubt 3 Eingabeversuche.
 - Die Wartezeit für erneutes Senden beträgt 67 Sekunden.
-- Im Selbstnutzungsmodus ist E-Mail-Verifizierung standardmäßig aus.
-- Im Mehrbenutzermodus ist E-Mail-Verifizierung standardmäßig an.
-- E-Mail-Domain-Prüfung und numerische QQ-Mail-Präfixprüfung sind standardmäßig aktiviert.
+- Registrierung, E-Mail-Verifizierung, Domain-Prüfung und QQ-Präfixprüfung sind standardmäßig deaktiviert.
+- Bei aktivierter Domain-Prüfung sind nur `qq.com`, `163.com`, `gmail.com`, `outlook.com`, `yeah.net`, `hotmail.com`, `126.com`, `foxmail.com`, `icloud.com`, `yahoo.com`, `sina.com` und `live.com` erlaubt.
+- Bei aktivierter QQ-Prüfung darf der Teil vor `@` bei `qq.com` nur aus Ziffern bestehen.
 
 ## Umami-Analytik
 
 Frontend-Umami erfasst Besuche der Pages-Konsole. Konfiguriere es in den Systemeinstellungen oder nutze die Pages-Variablen `VITE_UMAMI_SCRIPT_URL`, `VITE_UMAMI_WEBSITE_ID` und `VITE_UMAMI_HOST_URL`.
 
-Backend-Umami erfasst Worker-Anfragen als `backend_request`-Ereignisse. Konfiguriere es in den Systemeinstellungen oder nutze die Worker-Variablen `UMAMI_BACKEND_ENABLED`, `UMAMI_BACKEND_HOST_URL`, `UMAMI_BACKEND_WEBSITE_ID` und `UMAMI_BACKEND_HOSTNAME`.
+Backend-Umami sendet `backend_request`-Ereignisse über den offiziellen Endpunkt `POST /api/send`. Bei Aktivierung ist die Website ID erforderlich. Die Schaltfläche zum Speichern und Testen sendet ein `umami_test`-Ereignis.
 
 Backend-Tracking sendet keine Benutzer-E-Mail, keine API Keys und keine Request-Bodys. Gesendet werden nur Routenkategorie, Methode, Statuscode und Latenz.
 
@@ -250,7 +255,7 @@ Die Seite zeigt:
 
 Der Prozentsatz wird berechnet aus den Worker-Anfragen der letzten 24 Stunden geteilt durch `WORKERS_DAILY_REQUEST_LIMIT`. Der Standardwert ist `100000`.
 
-Automatische Abfragen laufen standardmäßig alle 6 Stunden. Ein Klick auf „jetzt sammeln“ sendet sofort eine Benachrichtigung, wenn Telegram- oder WxPusher-Variablen konfiguriert sind.
+Die automatische Erfassung erfolgt standardmäßig alle 6 Stunden und benötigt den oben beschriebenen Cron Trigger. Für automatische Push-Nachrichten muss auch der Benachrichtigungsschalter aktiv sein. „Jetzt sammeln“ sendet bei konfiguriertem Telegram oder WxPusher auch bei deaktivierter Automatik sofort eine Nachricht.
 
 ## API-Nutzung
 
@@ -285,7 +290,11 @@ Trage im Kanal die Versionswurzel der Upstream-API ein.
 | OpenRouter | `https://openrouter.ai/api/v1` |
 | Andere kompatible Dienste | normalerweise `https://domain/v1` |
 
-Das Backend normalisiert häufige Endungen wie `/v1`, `/v1/`, `/v1/chat` und `/v1/chat/completions`.
+Der Kanaltest erstellt zuerst `/v1/chat/completions`, prüft danach übliche Endungskombinationen und zuletzt die ursprüngliche URL. Erfolgreiche vollständige URL und Latenz werden gespeichert und für Completion-Anfragen verwendet. Die Modellsynchronisierung nutzt weiterhin Base URL plus `/v1/models`.
+
+Im Modellplatz können Administratoren Modelle eines ausgewählten Kanals gesammelt hinzufügen oder ausblenden. `-all` bei der Massenlöschung blendet alle Modelle dieses Kanals aus; erneutes Hinzufügen aktiviert sie wieder. Die Bereinigung entfernt Modelle gelöschter Kanäle.
+
+Neue API Keys werden vollständig angezeigt und können kopiert oder gelöscht werden. Alte Keys ohne gespeicherten Klartext können nicht wiederhergestellt werden; erstelle einen neuen Key, wenn nur das Präfix sichtbar ist. Normale Benutzer können gelöscht werden, aktueller Benutzer und Super-Admin jedoch nicht.
 
 ## Fehlerbehebung
 
@@ -295,7 +304,7 @@ Wenn das Frontend keine Verbindung zum Backend hat:
 2. Stelle sicher, dass sie auf die Worker-URL zeigt, nicht auf die Pages-URL.
 3. Stelle Pages nach Änderung der Pages-Variablen erneut bereit.
 4. Prüfe die Worker-Bindung `DB`.
-5. Prüfe die Worker-Variablen `APP_ORIGIN`, `ADMIN_SETUP_SECRET` und `JWT_SECRET`.
+5. Prüfe das Worker-`DB`-Binding und `APP_ORIGIN`; bei der ersten Einrichtung auch `ADMIN_SETUP_SECRET`.
 
 Wenn SillyTavern Unauthorized meldet:
 
@@ -311,8 +320,8 @@ Diese Variablen sind für normale Deployments nicht erforderlich.
 | Name | Zweck |
 | --- | --- |
 | `TELEGRAM_PARSE_MODE` | `HTML`, `MarkdownV2` oder `Markdown` |
-| `TELEGRAM_MESSAGE_THREAD_ID` | Telegram Forum Topic Thread ID |
-| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | Telegram Direct Message Topic ID |
+| `TELEGRAM_MESSAGE_THREAD_ID` | ID eines Telegram-Forumthemas |
+| `TELEGRAM_DIRECT_MESSAGES_TOPIC_ID` | ID eines Telegram-Direktnachrichtenthemas |
 | `TELEGRAM_DISABLE_NOTIFICATION` | stille Telegram-Benachrichtigung |
 | `TELEGRAM_PROTECT_CONTENT` | Telegram-Inhalte vor Weiterleitung oder Speichern schützen |
 | `TELEGRAM_LINK_PREVIEW_DISABLED` | Telegram-Linkvorschau deaktivieren |

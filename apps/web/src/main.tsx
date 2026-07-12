@@ -119,6 +119,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [bootError, setBootError] = useState('');
   const [notice, setNotice] = useState('');
+  const [umamiReady, setUmamiReady] = useState(false);
 
   const api = useMemo(() => makeApi(token, setNotice), [token]);
 
@@ -145,9 +146,11 @@ function App() {
     const enabled = settings.frontendUmamiEnabled || Boolean(fallbackUmamiWebsiteId);
     const oldScript = document.querySelector('script[data-only-api-umami]');
     oldScript?.remove();
+    setUmamiReady(false);
 
     if (!enabled || !websiteId || !scriptUrl) return;
 
+    let mounted = true;
     const script = document.createElement('script');
     script.async = true;
     script.defer = true;
@@ -155,19 +158,23 @@ function App() {
     script.setAttribute('data-only-api-umami', 'true');
     script.setAttribute('data-website-id', websiteId);
     if (hostUrl) script.setAttribute('data-host-url', hostUrl);
+    script.addEventListener('load', () => {
+      if (mounted) setUmamiReady(Boolean((window as any).umami?.track));
+    });
     document.head.appendChild(script);
 
     return () => {
+      mounted = false;
       script.remove();
     };
   }, [settings.frontendUmamiEnabled, settings.frontendUmamiScriptUrl, settings.frontendUmamiWebsiteId, settings.frontendUmamiHostUrl]);
 
   useEffect(() => {
     const tracker = (window as any).umami;
-    if (tracker?.track && (settings.frontendUmamiEnabled || Boolean(fallbackUmamiWebsiteId))) {
+    if (umamiReady && tracker?.track && (settings.frontendUmamiEnabled || Boolean(fallbackUmamiWebsiteId))) {
       tracker.track('console_view', { page: active });
     }
-  }, [active, settings.frontendUmamiEnabled]);
+  }, [active, settings.frontendUmamiEnabled, umamiReady]);
 
   async function refreshBootstrap() {
     const data = await api.get('/api/public/bootstrap', false);
@@ -662,6 +669,12 @@ function Models({ api, admin }: { api: ApiClient; admin: boolean }) {
   }
   async function applyBatch() {
     if (!batch.channel_id || !batch.models.trim()) return;
+    const deleteAll = batch.action === 'delete'
+      && batch.models.split(/[\s,]+/).some((model) => model.toLowerCase() === '-all');
+    if (deleteAll) {
+      const channelName = channels.find((channel) => channel.id === batch.channel_id)?.name || '当前渠道';
+      if (!window.confirm(`确定隐藏“${channelName}”的全部模型吗？`)) return;
+    }
     await api.post('/api/admin/models/batch', batch);
     setBatch({ ...batch, models: '' });
     await load();
@@ -704,7 +717,11 @@ function Models({ api, admin }: { api: ApiClient; admin: boolean }) {
               <option value="add">批量添加</option>
               <option value="delete">批量删除</option>
             </select>
-            <textarea value={batch.models} placeholder="每行一个模型名，也可用逗号分隔" onChange={(event) => setBatch({ ...batch, models: event.target.value })} />
+            <textarea
+              value={batch.models}
+              placeholder={batch.action === 'delete' ? '每行一个模型名；输入 -all 删除当前渠道全部模型' : '每行一个模型名，也可用逗号分隔'}
+              onChange={(event) => setBatch({ ...batch, models: event.target.value })}
+            />
             <button className="smallBtn" onClick={applyBatch}><Save />执行</button>
           </div>
         )}
@@ -759,6 +776,7 @@ function Models({ api, admin }: { api: ApiClient; admin: boolean }) {
 function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: SettingsShape; onSaved: (settings: SettingsShape) => void }) {
   const [form, setForm] = useState(settings);
   const [testingNotify, setTestingNotify] = useState('');
+  const [testingUmami, setTestingUmami] = useState(false);
   async function save() {
     const data = await api.put('/api/admin/settings', form);
     onSaved(data.settings);
@@ -769,6 +787,16 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
       await api.post('/api/admin/notify-test', { type });
     } finally {
       setTestingNotify('');
+    }
+  }
+  async function testUmami() {
+    setTestingUmami(true);
+    try {
+      const data = await api.put('/api/admin/settings', form);
+      onSaved(data.settings);
+      await api.post('/api/admin/umami-test', {});
+    } finally {
+      setTestingUmami(false);
     }
   }
   return (
@@ -801,7 +829,7 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
         </div>
         <div className="settingsSection">
           <strong>前端 Umami</strong>
-          <p className="hintText">用于统计 Pages 控制台访问。也可用 Pages 变量 `VITE_UMAMI_SCRIPT_URL`、`VITE_UMAMI_WEBSITE_ID`、`VITE_UMAMI_HOST_URL` 作为备用值。</p>
+          <p className="hintText">按 Umami 网站的 Tracking code 配置，用于统计 Pages 控制台访问。也可用 Pages 变量 `VITE_UMAMI_SCRIPT_URL`、`VITE_UMAMI_WEBSITE_ID`、`VITE_UMAMI_HOST_URL` 作为备用值。</p>
           <Toggle label="启用前端 Umami" checked={form.frontendUmamiEnabled} onChange={(frontendUmamiEnabled) => setForm({ ...form, frontendUmamiEnabled })} />
           <Input label="前端 Website ID" value={form.frontendUmamiWebsiteId || ''} onChange={(frontendUmamiWebsiteId) => setForm({ ...form, frontendUmamiWebsiteId })} />
           <Input label="前端 Script URL" value={form.frontendUmamiScriptUrl || ''} placeholder="https://cloud.umami.is/script.js" onChange={(frontendUmamiScriptUrl) => setForm({ ...form, frontendUmamiScriptUrl })} />
@@ -809,11 +837,14 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
         </div>
         <div className="settingsSection">
           <strong>后端 Umami</strong>
-          <p className="hintText">用于统计 Worker 请求。也可用 Worker 变量 `UMAMI_BACKEND_ENABLED`、`UMAMI_BACKEND_HOST_URL`、`UMAMI_BACKEND_WEBSITE_ID`、`UMAMI_BACKEND_HOSTNAME` 覆盖这里的设置。</p>
+          <p className="hintText">通过 Umami 官方 `POST /api/send` 事件接口统计 Worker 请求。也可用 Worker 变量 `UMAMI_BACKEND_ENABLED`、`UMAMI_BACKEND_HOST_URL`、`UMAMI_BACKEND_WEBSITE_ID`、`UMAMI_BACKEND_HOSTNAME` 覆盖这里的设置。</p>
           <Toggle label="启用后端 Umami" checked={form.backendUmamiEnabled} onChange={(backendUmamiEnabled) => setForm({ ...form, backendUmamiEnabled })} />
           <Input label="后端 Website ID" value={form.backendUmamiWebsiteId || ''} onChange={(backendUmamiWebsiteId) => setForm({ ...form, backendUmamiWebsiteId })} />
           <Input label="后端 Host URL" value={form.backendUmamiHostUrl || ''} placeholder="https://cloud.umami.is" onChange={(backendUmamiHostUrl) => setForm({ ...form, backendUmamiHostUrl })} />
           <Input label="后端 Hostname（可选）" value={form.backendUmamiHostname || ''} placeholder="api.example.com" onChange={(backendUmamiHostname) => setForm({ ...form, backendUmamiHostname })} />
+          <button className="smallBtn" onClick={testUmami} disabled={testingUmami}>
+            <RefreshCw className={testingUmami ? 'spin' : ''} />{testingUmami ? '测试中' : '保存并测试后端 Umami'}
+          </button>
         </div>
         <button className="primaryBtn" onClick={save}><Save />保存设置</button>
       </div>
