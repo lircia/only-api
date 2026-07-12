@@ -1,6 +1,6 @@
 # Only API
 
-Only API ist ein OpenAI-kompatibles API-Gateway für Cloudflare Workers + Pages. Es enthält ein Worker-Backend, ein Pages-Frontend, D1-Speicher, Benutzeranmeldung, Registrierung, API-Key-Ausgabe, Kanalverwaltung, einen Modellplatz, Nutzungsstatistiken, Workers-Nutzungsüberwachung und optionale Telegram- oder WxPusher-Benachrichtigungen.
+Only API ist ein OpenAI-kompatibles API-Gateway für Cloudflare Workers + Pages. Es enthält ein Worker-Backend, ein Pages-Frontend, D1-Speicher, Benutzeranmeldung, Registrierung, API-Key-Ausgabe, Kanalverwaltung, einen Modellplatz, Nutzungsstatistiken, Workers-Nutzungsüberwachung, optionale Telegram- oder WxPusher-Benachrichtigungen und optionale Umami-Analytik.
 
 Direkte Aufrufe einer Upstream-API können hohe Latenz oder Verbindungsfehler verursachen, wenn deren Dienstknoten weit entfernt oder die Netzwerkroute instabil ist. Only API leitet Anfragen über Cloudflare weiter und kann die Verbindung in solchen Situationen verbessern. Außerdem können mehrere OpenAI-kompatible Anbieter hinter einem einzigen API-Endpunkt gebündelt werden, sodass Clients Modelle verschiedener Kanäle über eine Adresse erreichen.
 
@@ -42,6 +42,7 @@ Dieses Repository ist für GitHub-Hosting und Deployment über das Cloudflare-Da
 - Nutzungsstatistiken für 3 Stunden, 1 Tag, 7 Tage, 15 Tage und Gesamtansicht.
 - Workers-Nutzung zeigt verwendeten Prozentsatz und verbleibenden Prozentsatz.
 - Workers-Nutzung wird standardmäßig alle 6 Stunden abgefragt und kann an Telegram oder WxPusher gesendet werden.
+- Optionale Umami-Analytik getrennt für Pages-Frontend und Worker-Backend.
 - Zeitangaben im Frontend werden auf UTC+8 angepasst.
 - Eingebaute Themes: Schwarz-Weiß, helles Blau-Weiß, Gelb-Lila, Grün-Rot und Pink-Orange.
 - Optionales Frontend-Hintergrundbild per URL.
@@ -141,6 +142,17 @@ Optionale Workers-Nutzungsvariablen:
 
 Akzeptierte Aliasnamen sind `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CF_ZONE_ID`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN` und `CLOUDFLARE_TOKEN`.
 
+Optionale Backend-Umami-Variablen:
+
+| Name | Typ | Zweck |
+| --- | --- | --- |
+| `UMAMI_BACKEND_ENABLED` | Variable | auf `true` setzen, um Worker-Backend-Tracking zu aktivieren |
+| `UMAMI_BACKEND_HOST_URL` | Variable | Umami-Host-URL, zum Beispiel `https://cloud.umami.is` |
+| `UMAMI_BACKEND_WEBSITE_ID` | Variable | Umami Website ID für Backend-Tracking |
+| `UMAMI_BACKEND_HOSTNAME` | Variable | optionaler Hostname in Umami, zum Beispiel `api.example.com` |
+
+Backend-Umami kann auch in den Systemeinstellungen konfiguriert werden. Worker-Variablen überschreiben die Systemeinstellungen.
+
 Telegram-Benachrichtigungsvariablen:
 
 | Name | Typ | Zweck |
@@ -185,6 +197,9 @@ Optionale Pages-Variablen:
 ```txt
 VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
 VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
+VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
+VITE_UMAMI_WEBSITE_ID=your-frontend-umami-website-id
+VITE_UMAMI_HOST_URL=https://cloud.umami.is
 ```
 
 Setze nach dem Pages-Deployment die Worker-Variable `APP_ORIGIN` auf die Pages-URL.
@@ -213,6 +228,14 @@ Wenn E-Mail-Verifizierung aktiviert ist, sendet die Registrierung keinen Link, s
 - Im Selbstnutzungsmodus ist E-Mail-Verifizierung standardmäßig aus.
 - Im Mehrbenutzermodus ist E-Mail-Verifizierung standardmäßig an.
 - E-Mail-Domain-Prüfung und numerische QQ-Mail-Präfixprüfung sind standardmäßig aktiviert.
+
+## Umami-Analytik
+
+Frontend-Umami erfasst Besuche der Pages-Konsole. Konfiguriere es in den Systemeinstellungen oder nutze die Pages-Variablen `VITE_UMAMI_SCRIPT_URL`, `VITE_UMAMI_WEBSITE_ID` und `VITE_UMAMI_HOST_URL`.
+
+Backend-Umami erfasst Worker-Anfragen als `backend_request`-Ereignisse. Konfiguriere es in den Systemeinstellungen oder nutze die Worker-Variablen `UMAMI_BACKEND_ENABLED`, `UMAMI_BACKEND_HOST_URL`, `UMAMI_BACKEND_WEBSITE_ID` und `UMAMI_BACKEND_HOSTNAME`.
+
+Backend-Tracking sendet keine Benutzer-E-Mail, keine API Keys und keine Request-Bodys. Gesendet werden nur Routenkategorie, Methode, Statuscode und Latenz.
 
 ## Workers-Nutzung und Benachrichtigungen
 

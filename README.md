@@ -1,6 +1,6 @@
 # Only API
 
-Only API is a Cloudflare Workers + Pages API gateway for OpenAI-compatible APIs. It provides a Worker backend, a Pages frontend, D1 storage, user login, registration, API key distribution, channel management, a Model Square, usage statistics, Workers usage monitoring, and optional Telegram / WxPusher notifications.
+Only API is a Cloudflare Workers + Pages API gateway for OpenAI-compatible APIs. It provides a Worker backend, a Pages frontend, D1 storage, user login, registration, API key distribution, channel management, a Model Square, usage statistics, Workers usage monitoring, optional Telegram / WxPusher notifications, and optional Umami analytics.
 
 Direct calls to an upstream API can suffer from high latency or connection failures when its service nodes are far away or the network route is unstable. Only API forwards requests through Cloudflare and may improve connectivity in these situations. It can also combine multiple OpenAI-compatible providers behind one API endpoint, so clients can use one address to access models from different channels.
 
@@ -42,6 +42,7 @@ This repository is designed for GitHub hosting and Cloudflare dashboard deployme
 - Usage statistics for 3 hours, 1 day, 7 days, 15 days, and all time.
 - Workers usage monitoring shows used percent and remaining percent.
 - Workers usage is checked every 6 hours by default and can be pushed to Telegram or WxPusher.
+- Optional Umami analytics for the Pages frontend and Worker backend.
 - Frontend time display is adjusted to UTC+8.
 - Built-in themes: black-white, light blue-white, yellow-purple, green-red, and pink-orange.
 - Optional frontend background image by URL.
@@ -141,6 +142,17 @@ Optional Workers usage variables:
 
 Accepted aliases are `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CF_ZONE_ID`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN`, and `CLOUDFLARE_TOKEN`.
 
+Optional backend Umami variables:
+
+| Name | Type | Purpose |
+| --- | --- | --- |
+| `UMAMI_BACKEND_ENABLED` | Variable | Set to `true` to enable Worker backend tracking |
+| `UMAMI_BACKEND_HOST_URL` | Variable | Umami host URL, for example `https://cloud.umami.is` |
+| `UMAMI_BACKEND_WEBSITE_ID` | Variable | Umami Website ID for backend tracking |
+| `UMAMI_BACKEND_HOSTNAME` | Variable | Optional hostname shown in Umami, for example `api.example.com` |
+
+Backend Umami can also be configured in System Settings. Worker variables override System Settings.
+
 Telegram notification variables:
 
 | Name | Type | Purpose |
@@ -185,6 +197,9 @@ Optional Pages variables:
 ```txt
 VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
 VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
+VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
+VITE_UMAMI_WEBSITE_ID=your-frontend-umami-website-id
+VITE_UMAMI_HOST_URL=https://cloud.umami.is
 ```
 
 After Pages is deployed, set Worker variable `APP_ORIGIN` to the Pages URL.
@@ -213,6 +228,14 @@ When email verification is enabled, registration sends a 13-digit numeric code b
 - Self-use mode defaults email verification to off.
 - Multi-user mode defaults email verification to on.
 - Email suffix validation and numeric QQ email prefix validation are enabled by default.
+
+## Umami Analytics
+
+Frontend Umami tracks visits to the Pages console. Configure it in System Settings, or use Pages variables `VITE_UMAMI_SCRIPT_URL`, `VITE_UMAMI_WEBSITE_ID`, and `VITE_UMAMI_HOST_URL`.
+
+Backend Umami tracks Worker requests as `backend_request` events. Configure it in System Settings, or use Worker variables `UMAMI_BACKEND_ENABLED`, `UMAMI_BACKEND_HOST_URL`, `UMAMI_BACKEND_WEBSITE_ID`, and `UMAMI_BACKEND_HOSTNAME`.
+
+Backend tracking does not send user email, API keys, or request bodies. It only sends route category, method, status code, and latency.
 
 ## Workers Usage And Notifications
 

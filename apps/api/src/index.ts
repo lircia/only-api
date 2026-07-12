@@ -35,6 +35,10 @@ export interface Env {
   WXPUSHER_URL?: string;
   WXPUSHER_CONTENT_TYPE?: string;
   WXPUSHER_VERIFY_PAY_TYPE?: string;
+  UMAMI_BACKEND_ENABLED?: string;
+  UMAMI_BACKEND_HOST_URL?: string;
+  UMAMI_BACKEND_WEBSITE_ID?: string;
+  UMAMI_BACKEND_HOSTNAME?: string;
 }
 
 type AuthedUser = {
@@ -51,6 +55,13 @@ type GatewayKey = {
   user_id: string;
   key_hash: string;
   status: string;
+};
+
+type BackendUmamiConfig = {
+  enabled: boolean;
+  hostUrl: string;
+  websiteId: string;
+  hostname: string;
 };
 
 const jsonHeaders = {
@@ -75,7 +86,7 @@ const allowedEmailDomains = new Set([
 const defaultPublicSettings = {
   siteName: 'Only API',
   appMode: 'self',
-  registrationEnabled: true,
+  registrationEnabled: false,
   emailVerificationEnabled: false,
   captchaEnabled: false,
   captchaSiteKey: '',
@@ -83,31 +94,53 @@ const defaultPublicSettings = {
   themeName: 'black-white',
   themeDefaultPinned: true,
   backgroundImageUrl: '',
-  emailDomainValidationEnabled: true,
-  qqEmailNumericPrefixRequired: true,
+  emailDomainValidationEnabled: false,
+  qqEmailNumericPrefixRequired: false,
   healthCheckIntervalMinutes: 60,
   workerUsageIntervalMinutes: 360,
-  notifyWorkerUsage: true
+  notifyWorkerUsage: false,
+  frontendUmamiEnabled: false,
+  frontendUmamiScriptUrl: '',
+  frontendUmamiWebsiteId: '',
+  frontendUmamiHostUrl: '',
+  backendUmamiEnabled: false,
+  backendUmamiHostUrl: '',
+  backendUmamiWebsiteId: '',
+  backendUmamiHostname: ''
 };
+
+let backendUmamiCache: { expiresAt: number; config: BackendUmamiConfig } | null = null;
+let channelRuntimeColumnsReady = false;
+let apiKeyRuntimeColumnsReady = false;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const started = Date.now();
     if (request.method === 'OPTIONS') return withCors(new Response(null, { status: 204 }), env);
 
     try {
       const url = new URL(request.url);
+      let response: Response;
       if (url.pathname.startsWith('/api/')) {
-        return withCors(await handleApi(request, env, ctx), env);
+        response = withCors(await handleApi(request, env, ctx), env);
+        ctx.waitUntil(trackBackendUmami(env, request, response, started));
+        return response;
       }
 
       if (isGatewayPath(url.pathname)) {
-        return withCors(await handleGateway(request, env, ctx), env);
+        response = withCors(await handleGateway(request, env, ctx), env);
+        ctx.waitUntil(trackBackendUmami(env, request, response, started));
+        return response;
       }
 
-      return withCors(json({ ok: true, service: 'only-api-worker' }), env);
+      response = withCors(json({ ok: true, service: 'only-api-worker' }), env);
+      ctx.waitUntil(trackBackendUmami(env, request, response, started));
+      return response;
     } catch (error) {
       const status = error instanceof HttpError ? error.status : 500;
-      return withCors(json({ error: getErrorMessage(error) }, status), env);
+      const response = withCors(json({ error: getErrorMessage(error) }, status), env);
+      ctx.waitUntil(trackBackendUmami(env, request, response, started));
+      return response;
     }
   },
 
@@ -146,6 +179,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   if (method === 'PUT' && path === '/api/admin/settings') return updateAdminSettings(request, env);
   if (method === 'GET' && path === '/api/admin/users') return listUsers(env);
   if (method === 'PATCH' && path.startsWith('/api/admin/users/')) return updateUser(request, env, path.split('/').pop() || '');
+  if (method === 'DELETE' && path.startsWith('/api/admin/users/')) return deleteUser(env, user, path.split('/').pop() || '');
   if (method === 'GET' && path === '/api/admin/channels') return listChannels(env);
   if (method === 'POST' && path === '/api/admin/channels') return createChannel(request, env);
   if (method === 'PUT' && path.startsWith('/api/admin/channels/')) return updateChannel(request, env, path.split('/').pop() || '');
@@ -165,6 +199,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
   }
   if (method === 'GET' && path === '/api/admin/worker-usage') return listWorkerUsage(env);
   if (method === 'POST' && path === '/api/admin/models/cleanup-orphans') return cleanupOrphanModels(env);
+  if (method === 'POST' && path === '/api/admin/models/batch') return batchModels(request, env);
   if (method === 'PATCH' && path.startsWith('/api/admin/models/')) return updateModel(request, env, path.split('/').pop() || '');
   if (method === 'DELETE' && path.startsWith('/api/admin/models/')) return deleteModel(env, path.split('/').pop() || '');
   if (method === 'POST' && path === '/api/admin/notify-test') return testNotification(request, env);
@@ -184,15 +219,23 @@ async function getBootstrap(env: Env): Promise<Response> {
       ...defaultPublicSettings,
       siteName: settings.siteName ?? defaultPublicSettings.siteName,
       appMode: settings.appMode ?? defaultPublicSettings.appMode,
-      registrationEnabled: settings.registrationEnabled ?? true,
+      registrationEnabled: settings.registrationEnabled ?? false,
       emailVerificationEnabled: isEmailVerificationRequired(settings),
       captchaEnabled: settings.captchaEnabled ?? false,
       captchaSiteKey: '',
       apiPublicBaseUrl: env.API_PUBLIC_BASE_URL ?? '',
       themeName: settings.themeName ?? defaultPublicSettings.themeName,
       backgroundImageUrl: settings.backgroundImageUrl ?? '',
-      emailDomainValidationEnabled: settings.emailDomainValidationEnabled ?? true,
-      qqEmailNumericPrefixRequired: settings.qqEmailNumericPrefixRequired ?? true
+      emailDomainValidationEnabled: settings.emailDomainValidationEnabled ?? false,
+      qqEmailNumericPrefixRequired: settings.qqEmailNumericPrefixRequired ?? false,
+      frontendUmamiEnabled: settings.frontendUmamiEnabled ?? false,
+      frontendUmamiScriptUrl: settings.frontendUmamiScriptUrl ?? '',
+      frontendUmamiWebsiteId: settings.frontendUmamiWebsiteId ?? '',
+      frontendUmamiHostUrl: settings.frontendUmamiHostUrl ?? '',
+      backendUmamiEnabled: settings.backendUmamiEnabled ?? false,
+      backendUmamiHostUrl: settings.backendUmamiHostUrl ?? '',
+      backendUmamiWebsiteId: settings.backendUmamiWebsiteId ?? '',
+      backendUmamiHostname: settings.backendUmamiHostname ?? ''
     }
   });
 }
@@ -213,18 +256,18 @@ async function setupSuperAdmin(request: Request, env: Env): Promise<Response> {
 
   const settings: Record<string, unknown> = {
     siteName: body.siteName || 'Only API',
-    appMode: body.appMode === 'multi' ? 'multi' : 'self',
-    registrationEnabled: body.appMode === 'multi',
-    emailVerificationEnabled: body.appMode === 'multi',
+    appMode: 'self',
+    registrationEnabled: false,
+    emailVerificationEnabled: false,
     captchaEnabled: false,
     healthCheckIntervalMinutes: 60,
     workerUsageIntervalMinutes: 360,
     themeName: 'black-white',
     themeDefaultPinned: true,
     backgroundImageUrl: '',
-    emailDomainValidationEnabled: true,
-    qqEmailNumericPrefixRequired: true,
-    notifyWorkerUsage: true
+    emailDomainValidationEnabled: false,
+    qqEmailNumericPrefixRequired: false,
+    notifyWorkerUsage: false
   };
   await saveSettings(env, settings);
   const session = await createSession(env, userId);
@@ -244,7 +287,7 @@ async function registerUser(request: Request, env: Env): Promise<Response> {
 
   const requireEmailVerification = isEmailVerificationRequired(settings);
   if (requireEmailVerification && (!env.RESEND_API_KEY || !env.RESEND_FROM)) {
-    return json({ error: '多人配置需要先配置 Resend 邮件发送变量' }, 400);
+    return json({ error: '邮箱验证需要先配置 Resend 邮件发送变量' }, 400);
   }
 
   const existing = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first<any>();
@@ -480,13 +523,15 @@ async function getUsageSummary(env: Env, user: AuthedUser): Promise<Response> {
 }
 
 async function listApiKeys(env: Env, user: AuthedUser): Promise<Response> {
+  await ensureApiKeyRuntimeColumns(env);
   const rows = await env.DB.prepare(
-    'SELECT id, name, key_prefix, status, last_used_at, created_at FROM api_keys WHERE user_id = ? ORDER BY created_at DESC'
+    'SELECT id, name, key_prefix, token, status, last_used_at, created_at FROM api_keys WHERE user_id = ? AND status = "active" ORDER BY created_at DESC'
   ).bind(user.id).all<any>();
   return json({ keys: rows.results || [] });
 }
 
 async function createApiKey(request: Request, env: Env, user: AuthedUser): Promise<Response> {
+  await ensureApiKeyRuntimeColumns(env);
   const body = await readJson(request);
   const raw = `oi-only-${randomToken(30)}`;
   const key = {
@@ -496,8 +541,8 @@ async function createApiKey(request: Request, env: Env, user: AuthedUser): Promi
     hash: await sha256(raw)
   };
   await env.DB.prepare(
-    'INSERT INTO api_keys (id, user_id, name, key_prefix, key_hash) VALUES (?, ?, ?, ?, ?)'
-  ).bind(key.id, user.id, key.name, key.prefix, key.hash).run();
+    'INSERT INTO api_keys (id, user_id, name, key_prefix, key_hash, token) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(key.id, user.id, key.name, key.prefix, key.hash, raw).run();
   return json({ key: { id: key.id, name: key.name, token: raw, key_prefix: key.prefix, status: 'active' } }, 201);
 }
 
@@ -513,9 +558,12 @@ async function listModels(env: Env): Promise<Response> {
      FROM model_catalog m
      LEFT JOIN channels c ON c.id = m.channel_id
      WHERE m.status = "enabled"
-     ORDER BY is_orphan DESC, COALESCE(NULLIF(m.display_name, ""), m.model_id) ASC`
+     ORDER BY is_orphan DESC, c.priority ASC, c.created_at DESC, COALESCE(NULLIF(m.display_name, ""), m.model_id) ASC`
   ).all<any>();
-  return json({ models: rows.results || [] });
+  const channelRows = await env.DB.prepare(
+    'SELECT id, name FROM channels ORDER BY priority ASC, created_at DESC'
+  ).all<any>();
+  return json({ models: rows.results || [], channels: channelRows.results || [] });
 }
 
 async function updateModel(request: Request, env: Env, modelRowId: string): Promise<Response> {
@@ -546,6 +594,41 @@ async function cleanupOrphanModels(env: Env): Promise<Response> {
   return json({ ok: true, deleted: count, message: `已删除 ${count} 个已删除渠道残留模型` });
 }
 
+async function batchModels(request: Request, env: Env): Promise<Response> {
+  const body = await readJson(request);
+  const channelId = String(body.channel_id || '').trim();
+  const action = body.action === 'delete' ? 'delete' : 'add';
+  const models = parseModels(body.models);
+  if (!channelId) return json({ error: '请选择渠道' }, 400);
+  const channel = await env.DB.prepare('SELECT id FROM channels WHERE id = ?').bind(channelId).first<any>();
+  if (!channel) return json({ error: '渠道不存在' }, 404);
+  if (!models.length) return json({ error: '请填写模型名' }, 400);
+
+  if (action === 'delete') {
+    const statements = models.map((modelId) =>
+      env.DB.prepare('UPDATE model_catalog SET status = "disabled" WHERE channel_id = ? AND (model_id = ? OR display_name = ?)')
+        .bind(channelId, modelId, modelId)
+    );
+    await env.DB.batch(statements);
+    return json({ ok: true, changed: models.length, message: `已隐藏 ${models.length} 个模型` });
+  }
+
+  const existingRows = await env.DB.prepare('SELECT id, model_id FROM model_catalog WHERE channel_id = ?').bind(channelId).all<any>();
+  const existing = new Map<string, string>();
+  for (const row of existingRows.results || []) existing.set(row.model_id, row.id);
+  const statements = models.map((modelId) => {
+    const existingId = existing.get(modelId);
+    if (existingId) {
+      return env.DB.prepare('UPDATE model_catalog SET display_name = ?, status = "enabled" WHERE id = ?')
+        .bind(modelId, existingId);
+    }
+    return env.DB.prepare('INSERT INTO model_catalog (id, channel_id, model_id, display_name, status) VALUES (?, ?, ?, ?, "enabled")')
+      .bind(id('mdl'), channelId, modelId, modelId);
+  });
+  await env.DB.batch(statements);
+  return json({ ok: true, changed: models.length, message: `已添加 ${models.length} 个模型` });
+}
+
 async function getAdminSettings(env: Env): Promise<Response> {
   return json({ settings: await getSettings(env) });
 }
@@ -554,7 +637,6 @@ async function updateAdminSettings(request: Request, env: Env): Promise<Response
   const body = await readJson(request);
   const allowed = [
     'siteName',
-    'appMode',
     'registrationEnabled',
     'emailVerificationEnabled',
     'captchaEnabled',
@@ -565,7 +647,15 @@ async function updateAdminSettings(request: Request, env: Env): Promise<Response
     'healthCheckIntervalMinutes',
     'workerUsageIntervalMinutes',
     'defaultChannelStrategy',
-    'notifyWorkerUsage'
+    'notifyWorkerUsage',
+    'frontendUmamiEnabled',
+    'frontendUmamiScriptUrl',
+    'frontendUmamiWebsiteId',
+    'frontendUmamiHostUrl',
+    'backendUmamiEnabled',
+    'backendUmamiHostUrl',
+    'backendUmamiWebsiteId',
+    'backendUmamiHostname'
   ];
   const updates: Record<string, unknown> = {};
   for (const key of allowed) {
@@ -573,6 +663,7 @@ async function updateAdminSettings(request: Request, env: Env): Promise<Response
   }
   if ('themeName' in body) updates.themeDefaultPinned = true;
   await saveSettings(env, updates);
+  if (Object.keys(updates).some((key) => key.startsWith('backendUmami'))) backendUmamiCache = null;
   return json({ settings: await getSettings(env) });
 }
 
@@ -592,9 +683,20 @@ async function updateUser(request: Request, env: Env, userId: string): Promise<R
   return json({ ok: true });
 }
 
+async function deleteUser(env: Env, actor: AuthedUser, userId: string): Promise<Response> {
+  if (actor.id === userId) return json({ error: '不能删除当前登录用户' }, 400);
+  const target = await env.DB.prepare('SELECT id, role FROM users WHERE id = ?').bind(userId).first<any>();
+  if (!target) return json({ error: '用户不存在' }, 404);
+  if (target.role === 'super_admin') return json({ error: '不能删除超级管理员' }, 400);
+  await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(userId).run();
+  return json({ ok: true, message: '用户已删除' });
+}
+
 async function listChannels(env: Env): Promise<Response> {
+  await ensureChannelRuntimeColumns(env);
   const rows = await env.DB.prepare(
-    `SELECT c.id, c.name, c.provider, c.base_url, c.priority, c.status, c.health_status, c.health_message, c.last_checked_at, c.created_at,
+    `SELECT c.id, c.name, c.provider, c.base_url, c.priority, c.status, c.health_status, c.health_message,
+      c.health_latency_ms, c.working_url, c.last_checked_at, c.created_at,
       GROUP_CONCAT(m.model_id, char(10)) AS models
      FROM channels c
      LEFT JOIN model_catalog m ON m.channel_id = c.id AND m.status = "enabled"
@@ -605,6 +707,7 @@ async function listChannels(env: Env): Promise<Response> {
 }
 
 async function createChannel(request: Request, env: Env): Promise<Response> {
+  await ensureChannelRuntimeColumns(env);
   const body = await readJson(request);
   validateChannel(body);
   const channelId = id('chn');
@@ -616,10 +719,11 @@ async function createChannel(request: Request, env: Env): Promise<Response> {
 }
 
 async function updateChannel(request: Request, env: Env, channelId: string): Promise<Response> {
+  await ensureChannelRuntimeColumns(env);
   const body = await readJson(request);
   validateChannel(body, true);
   await env.DB.prepare(
-    'UPDATE channels SET name = ?, provider = ?, base_url = ?, api_key = ?, priority = ?, status = ?, updated_at = ? WHERE id = ?'
+    'UPDATE channels SET name = ?, provider = ?, base_url = ?, api_key = ?, priority = ?, status = ?, working_url = "", health_latency_ms = 0, updated_at = ? WHERE id = ?'
   ).bind(body.name, body.provider || 'openai-compatible', normalizeBaseUrl(body.base_url), body.api_key, Number(body.priority || 100), body.status || 'active', new Date().toISOString(), channelId).run();
   if ('models' in body) await saveChannelModels(env, channelId, body.models);
   return json({ ok: true });
@@ -680,7 +784,7 @@ async function handleGateway(request: Request, env: Env, ctx: ExecutionContext):
     requestBody = JSON.stringify(parsedBody);
   }
 
-  const target = buildUpstreamUrl(channel.base_url, url.pathname, url.search);
+  const target = buildChannelRequestUrl(channel, url.pathname, url.search);
   const headers = new Headers(request.headers);
   headers.set('authorization', `Bearer ${channel.api_key}`);
   headers.delete('host');
@@ -824,32 +928,32 @@ async function checkChannelHealth(env: Env): Promise<void> {
 }
 
 async function checkSingleChannelHealth(env: Env, channelId: string): Promise<Record<string, unknown>> {
+  await ensureChannelRuntimeColumns(env);
   const channel = await env.DB.prepare('SELECT * FROM channels WHERE id = ?').bind(channelId).first<any>();
   if (!channel) throw new HttpError('渠道不存在', 404);
-  try {
-    const res = await fetch(buildUpstreamUrl(channel.base_url, '/v1/models'), {
-      headers: { authorization: `Bearer ${channel.api_key}` },
-      signal: AbortSignal.timeout(12000)
-    });
-    const ok = res.ok;
-    await env.DB.prepare('UPDATE channels SET health_status = ?, health_message = ?, last_checked_at = ? WHERE id = ?')
-      .bind(ok ? 'ok' : 'error', ok ? '模型接口可用' : `HTTP ${res.status}`, new Date().toISOString(), channel.id).run();
-    const modelCount = ok ? await refreshModelsForChannel(env, channel.id) : 0;
+  const result = await testChannelCompletionUrl(channel);
+  if (result.ok) {
+    const modelCount = await refreshModelsForChannel(env, channel.id);
+    await env.DB.prepare('UPDATE channels SET health_status = "ok", health_message = ?, health_latency_ms = ?, working_url = ?, last_checked_at = ? WHERE id = ?')
+      .bind(`调用接口可用，已同步 ${modelCount} 个模型`, result.latencyMs, result.url, new Date().toISOString(), channel.id).run();
     return {
-      ok,
-      status: res.status,
+      ok: true,
+      status: result.status,
+      latencyMs: result.latencyMs,
+      workingUrl: result.url,
       modelCount,
-      message: ok ? `渠道测试成功，已同步 ${modelCount} 个模型` : `渠道测试失败：HTTP ${res.status}`
+      message: `渠道测试成功，延迟 ${result.latencyMs}ms，已同步 ${modelCount} 个模型`
     };
-  } catch (error) {
-    const message = getErrorMessage(error).slice(0, 200);
-    await env.DB.prepare('UPDATE channels SET health_status = "error", health_message = ?, last_checked_at = ? WHERE id = ?')
-      .bind(message, new Date().toISOString(), channel.id).run();
-    return { ok: false, error: message, message: `渠道测试失败：${message}` };
   }
+
+  const message = result.error.slice(0, 200);
+  await env.DB.prepare('UPDATE channels SET health_status = "error", health_message = ?, health_latency_ms = 0, working_url = "", last_checked_at = ? WHERE id = ?')
+    .bind(message, new Date().toISOString(), channel.id).run();
+  return { ok: false, error: message, message: `渠道测试失败：${message}` };
 }
 
 async function refreshModelsForChannel(env: Env, channelId: string): Promise<number> {
+  await ensureChannelRuntimeColumns(env);
   const channel = await env.DB.prepare('SELECT * FROM channels WHERE id = ?').bind(channelId).first<any>();
   if (!channel) return 0;
   try {
@@ -1335,7 +1439,7 @@ async function getSettings(env: Env): Promise<Record<string, any>> {
   }
   const merged = { ...defaultPublicSettings, ...settings };
   if (!Object.prototype.hasOwnProperty.call(settings, 'emailVerificationEnabled')) {
-    merged.emailVerificationEnabled = merged.appMode === 'multi';
+    merged.emailVerificationEnabled = false;
   }
   if (!Object.prototype.hasOwnProperty.call(settings, 'themeDefaultPinned')) {
     merged.themeName = defaultPublicSettings.themeName;
@@ -1375,7 +1479,7 @@ function isAdmin(user: AuthedUser): boolean {
 
 function isEmailVerificationRequired(settings: Record<string, any>): boolean {
   if (typeof settings.emailVerificationEnabled === 'boolean') return settings.emailVerificationEnabled;
-  return settings.appMode === 'multi';
+  return false;
 }
 
 function validateChannel(body: any, _requireExisting = false): void {
@@ -1406,6 +1510,151 @@ function buildUpstreamUrl(baseUrl: string, apiPath: string, search = ''): string
   return `${base}${apiPath}${search}`;
 }
 
+function buildChannelRequestUrl(channel: any, apiPath: string, search = ''): string {
+  const workingUrl = String(channel.working_url || '').trim();
+  if (!workingUrl) return buildUpstreamUrl(channel.base_url, apiPath, search);
+  const url = new URL(workingUrl);
+  if (!isCompletionPath(apiPath)) {
+    return buildUpstreamUrl(channel.base_url, apiPath, search);
+  }
+  url.search = search.startsWith('?') ? search.slice(1) : search;
+  return url.toString();
+}
+
+function isCompletionPath(apiPath: string): boolean {
+  return apiPath.toLowerCase().endsWith('/chat/completions') || apiPath.toLowerCase().endsWith('/completions');
+}
+
+async function testChannelCompletionUrl(channel: any): Promise<{ ok: boolean; url: string; status: number; latencyMs: number; error: string }> {
+  const candidates = buildCompletionProbeUrls(channel.base_url);
+  let lastError = '';
+  for (const target of candidates) {
+    const started = Date.now();
+    try {
+      const res = await fetch(target, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${channel.api_key}`,
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'only-api-health-check',
+          messages: [{ role: 'user', content: 'ping' }],
+          max_tokens: 1,
+          stream: false
+        }),
+        signal: AbortSignal.timeout(12000)
+      });
+      const text = await res.clone().text().catch(() => '');
+      const latencyMs = Date.now() - started;
+      if (isUsableCompletionProbe(res.status, text)) {
+        return { ok: true, url: target, status: res.status, latencyMs, error: '' };
+      }
+      lastError = `${target} HTTP ${res.status}${text ? `: ${text.slice(0, 120)}` : ''}`;
+    } catch (error) {
+      lastError = `${target} ${getErrorMessage(error)}`;
+    }
+  }
+  return { ok: false, url: '', status: 0, latencyMs: 0, error: lastError || '所有候选调用 URL 均测试失败' };
+}
+
+function buildCompletionProbeUrls(baseUrl: string): string[] {
+  const raw = baseUrl.trim().replace(/\/+$/, '');
+  const suffixes = [
+    '/v1',
+    '/chat',
+    '/completions',
+    '/v1/chat',
+    '/chat/completions',
+    '/chat/comptions'
+  ];
+  const seen = new Set<string>();
+  const urls: string[] = [];
+  const add = (value: string) => {
+    try {
+      const normalized = new URL(value).toString();
+      if (!seen.has(normalized)) {
+        seen.add(normalized);
+        urls.push(normalized);
+      }
+    } catch {
+      // validateChannel catches bad URLs; keep this guard for runtime safety.
+    }
+  };
+  add(completeCompletionUrl(raw));
+  for (const suffix of suffixes) add(joinUrlPath(raw, suffix));
+  add(raw);
+  return urls;
+}
+
+function completeCompletionUrl(value: string): string {
+  const url = new URL(value);
+  let path = url.pathname.replace(/\/+$/, '');
+  if (/\/v1\/chat$/i.test(path)) path += '/completions';
+  else if (/\/v1$/i.test(path)) path += '/chat/completions';
+  else if (/\/chat$/i.test(path)) path += '/completions';
+  else if (!/\/(chat\/)?completions$/i.test(path) && !/\/chat\/comptions$/i.test(path)) path += '/v1/chat/completions';
+  url.pathname = path || '/v1/chat/completions';
+  return url.toString();
+}
+
+function joinUrlPath(base: string, suffix: string): string {
+  const url = new URL(base);
+  const basePath = url.pathname.replace(/\/+$/, '');
+  const suffixPath = suffix.replace(/^\/+/, '');
+  url.pathname = `${basePath}/${suffixPath}`.replace(/\/{2,}/g, '/');
+  return url.toString();
+}
+
+function isUsableCompletionProbe(status: number, text: string): boolean {
+  if (status >= 200 && status < 300) return true;
+  if (status === 400 || status === 422) return !looksLikeMissingEndpoint(status, text) && !looksLikeAuthOrQuotaError(text);
+  return false;
+}
+
+function looksLikeMissingEndpoint(status: number, text: string): boolean {
+  const lower = text.toLowerCase();
+  return status === 404 || status === 405 || lower.includes('not found') || lower.includes('cannot post') || lower.includes('unknown endpoint');
+}
+
+function looksLikeAuthOrQuotaError(text: string): boolean {
+  const lower = text.toLowerCase();
+  return lower.includes('unauthorized')
+    || lower.includes('forbidden')
+    || lower.includes('invalid api key')
+    || lower.includes('invalid token')
+    || lower.includes('permission')
+    || lower.includes('insufficient')
+    || lower.includes('quota')
+    || lower.includes('balance')
+    || lower.includes('billing');
+}
+
+async function ensureChannelRuntimeColumns(env: Env): Promise<void> {
+  if (channelRuntimeColumnsReady) return;
+  for (const sql of [
+    'ALTER TABLE channels ADD COLUMN health_latency_ms INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE channels ADD COLUMN working_url TEXT NOT NULL DEFAULT ""'
+  ]) {
+    try {
+      await env.DB.prepare(sql).run();
+    } catch {
+      // Existing databases may already have the column.
+    }
+  }
+  channelRuntimeColumnsReady = true;
+}
+
+async function ensureApiKeyRuntimeColumns(env: Env): Promise<void> {
+  if (apiKeyRuntimeColumnsReady) return;
+  try {
+    await env.DB.prepare('ALTER TABLE api_keys ADD COLUMN token TEXT NOT NULL DEFAULT ""').run();
+  } catch {
+    // Existing databases may already have the column.
+  }
+  apiKeyRuntimeColumnsReady = true;
+}
+
 function isGatewayPath(pathname: string): boolean {
   const path = pathname.toLowerCase();
   return path.startsWith('/v1/') || isModelPath(path);
@@ -1424,6 +1673,93 @@ function getBearerToken(request: Request): string {
   return request.headers.get('x-api-key')?.trim()
     || request.headers.get('api-key')?.trim()
     || '';
+}
+
+async function trackBackendUmami(env: Env, request: Request, response: Response, startedAt: number): Promise<void> {
+  try {
+    const config = await getCachedBackendUmamiConfig(env);
+    if (!config.enabled || !config.websiteId) return;
+
+    const hostUrl = normalizeUmamiHostUrl(config.hostUrl || 'https://cloud.umami.is');
+    if (!hostUrl) return;
+
+    const url = new URL(request.url);
+    const route = backendRouteName(url.pathname);
+    const latencyMs = Math.max(0, Date.now() - startedAt);
+    await fetch(`${hostUrl}/api/send`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'user-agent': request.headers.get('user-agent') || 'Only API Worker'
+      },
+      body: JSON.stringify({
+        type: 'event',
+        payload: {
+          website: config.websiteId,
+          hostname: config.hostname || url.hostname,
+          language: firstHeaderValue(request.headers.get('accept-language')) || 'zh-CN',
+          referrer: request.headers.get('referer') || '',
+          title: 'Only API Worker',
+          url: route,
+          name: 'backend_request',
+          data: {
+            method: request.method.toUpperCase(),
+            route,
+            status: response.status,
+            latencyMs
+          }
+        }
+      })
+    });
+  } catch {
+    // Analytics must never affect API forwarding.
+  }
+}
+
+async function getCachedBackendUmamiConfig(env: Env): Promise<BackendUmamiConfig> {
+  if (backendUmamiCache && backendUmamiCache.expiresAt > Date.now()) return backendUmamiCache.config;
+  const settings = await getSettings(env);
+  const config = getBackendUmamiConfig(env, settings);
+  backendUmamiCache = { expiresAt: Date.now() + 60 * 1000, config };
+  return config;
+}
+
+function getBackendUmamiConfig(env: Env, settings: Record<string, any>): BackendUmamiConfig {
+  const websiteId = String(env.UMAMI_BACKEND_WEBSITE_ID || settings.backendUmamiWebsiteId || '').trim();
+  return {
+    enabled: readOptionalBoolean(env.UMAMI_BACKEND_ENABLED, settings.backendUmamiEnabled === true),
+    hostUrl: String(env.UMAMI_BACKEND_HOST_URL || settings.backendUmamiHostUrl || '').trim(),
+    websiteId,
+    hostname: String(env.UMAMI_BACKEND_HOSTNAME || settings.backendUmamiHostname || '').trim()
+  };
+}
+
+function readOptionalBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value === '') return fallback;
+  return ['1', 'true', 'yes', 'on', 'enabled'].includes(value.trim().toLowerCase());
+}
+
+function normalizeUmamiHostUrl(value: string): string {
+  const raw = value.trim();
+  if (!raw) return '';
+  return raw
+    .replace(/\/+$/, '')
+    .replace(/\/script\.js$/i, '')
+    .replace(/\/api\/send$/i, '');
+}
+
+function backendRouteName(pathname: string): string {
+  const path = pathname.toLowerCase();
+  if (isModelPath(path)) return '/v1/models';
+  if (path.startsWith('/v1/')) return '/v1/*';
+  if (path.startsWith('/api/admin/')) return '/api/admin/*';
+  if (path.startsWith('/api/auth/')) return '/api/auth/*';
+  if (path.startsWith('/api/')) return '/api/*';
+  return '/';
+}
+
+function firstHeaderValue(value: string | null): string {
+  return (value || '').split(',')[0]?.trim() || '';
 }
 
 async function readJson(request: Request): Promise<any> {

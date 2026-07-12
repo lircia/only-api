@@ -1,6 +1,6 @@
 # Only API
 
-Only API هو بوابة API متوافقة مع OpenAI ويمكن نشرها على Cloudflare Workers + Pages. يحتوي المشروع على خلفية Worker، وواجهة Pages، وقاعدة D1، وتسجيل دخول المستخدمين، والتسجيل، وتوزيع API Key، وإدارة القنوات، وساحة النماذج، وإحصاءات الاستخدام، ومراقبة استخدام Workers، وتنبيهات اختيارية عبر Telegram أو WxPusher.
+Only API هو بوابة API متوافقة مع OpenAI ويمكن نشرها على Cloudflare Workers + Pages. يحتوي المشروع على خلفية Worker، وواجهة Pages، وقاعدة D1، وتسجيل دخول المستخدمين، والتسجيل، وتوزيع API Key، وإدارة القنوات، وساحة النماذج، وإحصاءات الاستخدام، ومراقبة استخدام Workers، وتنبيهات اختيارية عبر Telegram أو WxPusher، وإحصاءات Umami اختيارية.
 
 قد تعاني الاستدعاءات المباشرة إلى upstream API من تأخير مرتفع أو فشل في الاتصال عندما تكون عقد الخدمة بعيدة أو يكون مسار الشبكة غير مستقر. يمرر Only API الطلبات عبر Cloudflare، وقد يحسن الاتصال في مثل هذه الحالات. ويمكنه أيضا جمع عدة مزودين متوافقين مع OpenAI خلف عنوان API واحد، بحيث يصل العميل إلى نماذج القنوات المختلفة من خلال عنوان واحد.
 
@@ -42,6 +42,7 @@ Only API هو بوابة API متوافقة مع OpenAI ويمكن نشرها ع
 - إحصاءات استخدام لمدة 3 ساعات، ويوم واحد، و7 أيام، و15 يوما، وإجمالي الاستخدام.
 - صفحة استخدام Workers تعرض نسبة الاستخدام والنسبة المتبقية.
 - يتم فحص استخدام Workers افتراضيا كل 6 ساعات، ويمكن إرساله إلى Telegram أو WxPusher.
+- دعم إحصاءات Umami اختيارية بشكل منفصل لواجهة Pages وخلفية Worker.
 - عرض الوقت في الواجهة الأمامية مضبوط على UTC+8.
 - سمات مدمجة: أسود وأبيض، أزرق فاتح وأبيض، أصفر وبنفسجي، أخضر وأحمر، وردي وبرتقالي.
 - صورة خلفية اختيارية للواجهة الأمامية عبر URL.
@@ -141,6 +142,17 @@ apps/api/migrations/0001_initial.sql
 
 الأسماء البديلة المقبولة هي `CLOUDFLARE_ACCOUNT_ID` و`CF_ACCOUNT_TAG` و`CLOUDFLARE_ACCOUNT_TAG` و`CF_ZONE_ID` و`CLOUDFLARE_ZONE_ID` و`CLOUDFLARE_API_TOKEN` و`CF_TOKEN` و`CLOUDFLARE_TOKEN`.
 
+متغيرات Umami الخلفية الاختيارية:
+
+| الاسم | النوع | الغرض |
+| --- | --- | --- |
+| `UMAMI_BACKEND_ENABLED` | Variable | ضع `true` لتفعيل تتبع خلفية Worker |
+| `UMAMI_BACKEND_HOST_URL` | Variable | رابط مضيف Umami، مثل `https://cloud.umami.is` |
+| `UMAMI_BACKEND_WEBSITE_ID` | Variable | Umami Website ID لتتبع الخلفية |
+| `UMAMI_BACKEND_HOSTNAME` | Variable | اسم مضيف اختياري يظهر في Umami، مثل `api.example.com` |
+
+يمكن ضبط Umami الخلفية أيضا من إعدادات النظام. متغيرات Worker تتجاوز إعدادات النظام.
+
 متغيرات تنبيه Telegram:
 
 | الاسم | النوع | الغرض |
@@ -185,6 +197,9 @@ VITE_API_BASE_URL=https://your-worker-domain.workers.dev
 ```txt
 VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
 VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
+VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
+VITE_UMAMI_WEBSITE_ID=your-frontend-umami-website-id
+VITE_UMAMI_HOST_URL=https://cloud.umami.is
 ```
 
 بعد نشر Pages، اضبط متغير Worker `APP_ORIGIN` على رابط Pages.
@@ -213,6 +228,14 @@ VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
 - وضع الاستخدام الشخصي يعطل تحقق البريد افتراضيا.
 - وضع تعدد المستخدمين يفعل تحقق البريد افتراضيا.
 - تحقق لاحقة البريد وتحقق بادئة QQ الرقمية مفعلان افتراضيا.
+
+## إحصاءات Umami
+
+Umami للواجهة الأمامية يسجل زيارات لوحة Pages. يمكنك ضبطه في إعدادات النظام، أو استخدام متغيرات Pages `VITE_UMAMI_SCRIPT_URL` و`VITE_UMAMI_WEBSITE_ID` و`VITE_UMAMI_HOST_URL`.
+
+Umami للخلفية يسجل طلبات Worker كأحداث `backend_request`. يمكنك ضبطه في إعدادات النظام، أو استخدام متغيرات Worker `UMAMI_BACKEND_ENABLED` و`UMAMI_BACKEND_HOST_URL` و`UMAMI_BACKEND_WEBSITE_ID` و`UMAMI_BACKEND_HOSTNAME`.
+
+تتبع الخلفية لا يرسل بريد المستخدم ولا API Key ولا جسم الطلب. يرسل فقط فئة المسار، وطريقة الطلب، ورمز الحالة، وزمن الاستجابة.
 
 ## استخدام Workers والتنبيهات
 

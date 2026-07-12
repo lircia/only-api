@@ -44,6 +44,14 @@ type SettingsShape = {
   backgroundImageUrl: string;
   emailDomainValidationEnabled: boolean;
   qqEmailNumericPrefixRequired: boolean;
+  frontendUmamiEnabled: boolean;
+  frontendUmamiScriptUrl: string;
+  frontendUmamiWebsiteId: string;
+  frontendUmamiHostUrl: string;
+  backendUmamiEnabled: boolean;
+  backendUmamiHostUrl: string;
+  backendUmamiWebsiteId: string;
+  backendUmamiHostname: string;
 };
 
 type NavKey = 'dashboard' | 'keys' | 'usage' | 'models' | 'settings' | 'users' | 'channels' | 'workerUsage';
@@ -66,21 +74,32 @@ function clearSessionToken() {
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim();
 const fallbackBackgroundImageUrl = (import.meta.env.VITE_BACKGROUND_IMAGE_URL || '').trim();
+const fallbackUmamiScriptUrl = (import.meta.env.VITE_UMAMI_SCRIPT_URL || '').trim();
+const fallbackUmamiWebsiteId = (import.meta.env.VITE_UMAMI_WEBSITE_ID || '').trim();
+const fallbackUmamiHostUrl = (import.meta.env.VITE_UMAMI_HOST_URL || '').trim();
 const defaultSettings: SettingsShape = {
   siteName: 'Only API',
   appMode: 'self',
-  registrationEnabled: true,
+  registrationEnabled: false,
   emailVerificationEnabled: false,
   captchaEnabled: false,
   captchaSiteKey: '',
   healthCheckIntervalMinutes: 60,
   workerUsageIntervalMinutes: 360,
   defaultChannelStrategy: 'priority',
-  notifyWorkerUsage: true,
+  notifyWorkerUsage: false,
   themeName: 'black-white',
   backgroundImageUrl: '',
-  emailDomainValidationEnabled: true,
-  qqEmailNumericPrefixRequired: true
+  emailDomainValidationEnabled: false,
+  qqEmailNumericPrefixRequired: false,
+  frontendUmamiEnabled: false,
+  frontendUmamiScriptUrl: '',
+  frontendUmamiWebsiteId: '',
+  frontendUmamiHostUrl: '',
+  backendUmamiEnabled: false,
+  backendUmamiHostUrl: '',
+  backendUmamiWebsiteId: '',
+  backendUmamiHostname: ''
 };
 
 const themeOptions = [
@@ -118,6 +137,37 @@ function App() {
     document.documentElement.style.setProperty('--app-bg-image', `url("${safeUrl}")`);
     document.documentElement.dataset.hasBgImage = 'true';
   }, [settings.backgroundImageUrl]);
+
+  useEffect(() => {
+    const websiteId = (settings.frontendUmamiWebsiteId || fallbackUmamiWebsiteId).trim();
+    const scriptUrl = (settings.frontendUmamiScriptUrl || fallbackUmamiScriptUrl || (websiteId ? 'https://cloud.umami.is/script.js' : '')).trim();
+    const hostUrl = (settings.frontendUmamiHostUrl || fallbackUmamiHostUrl).trim();
+    const enabled = settings.frontendUmamiEnabled || Boolean(fallbackUmamiWebsiteId);
+    const oldScript = document.querySelector('script[data-only-api-umami]');
+    oldScript?.remove();
+
+    if (!enabled || !websiteId || !scriptUrl) return;
+
+    const script = document.createElement('script');
+    script.async = true;
+    script.defer = true;
+    script.src = scriptUrl;
+    script.setAttribute('data-only-api-umami', 'true');
+    script.setAttribute('data-website-id', websiteId);
+    if (hostUrl) script.setAttribute('data-host-url', hostUrl);
+    document.head.appendChild(script);
+
+    return () => {
+      script.remove();
+    };
+  }, [settings.frontendUmamiEnabled, settings.frontendUmamiScriptUrl, settings.frontendUmamiWebsiteId, settings.frontendUmamiHostUrl]);
+
+  useEffect(() => {
+    const tracker = (window as any).umami;
+    if (tracker?.track && (settings.frontendUmamiEnabled || Boolean(fallbackUmamiWebsiteId))) {
+      tracker.track('console_view', { page: active });
+    }
+  }, [active, settings.frontendUmamiEnabled]);
 
   async function refreshBootstrap() {
     const data = await api.get('/api/public/bootstrap', false);
@@ -199,7 +249,7 @@ function App() {
           <div className="brandMark">OA</div>
           <div>
             <strong>{settings.siteName}</strong>
-            <span>{settings.appMode === 'multi' ? '多人模式' : '自用模式'}</span>
+            <span>API 中转控制台</span>
           </div>
         </div>
         <nav>
@@ -266,7 +316,7 @@ function Shell({ title, children }: { title: string; children: React.ReactNode }
 }
 
 function Setup({ settings, api, onDone }: { settings: SettingsShape; api: ApiClient; onDone: (token: string, user: User) => void }) {
-  const [form, setForm] = useState({ secret: '', email: '', name: 'Super Admin', password: '', siteName: settings.siteName, appMode: 'self' });
+  const [form, setForm] = useState({ secret: '', email: '', name: 'Super Admin', password: '', siteName: settings.siteName });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   async function submit(event: React.FormEvent) {
@@ -291,7 +341,6 @@ function Setup({ settings, api, onDone }: { settings: SettingsShape; api: ApiCli
       <Input label="名称" value={form.name} onChange={(name) => setForm({ ...form, name })} />
       <Input label="密码" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} />
       <Input label="站点名称" value={form.siteName} onChange={(siteName) => setForm({ ...form, siteName })} />
-      <Segmented value={form.appMode} options={[['self', '自用配置'], ['multi', '多人配置']]} onChange={(appMode) => setForm({ ...form, appMode })} />
       <p className="hintText">密码至少 8 位，管理员密钥必须和 Worker 变量 `ADMIN_SETUP_SECRET` 完全一致。</p>
       {error && <p className="errorText">{error}</p>}
       <button className="primaryBtn" disabled={busy}><Shield />{busy ? '正在初始化' : '完成初始化'}</button>
@@ -444,20 +493,36 @@ function Dashboard({ api }: { api: ApiClient }) {
 
 function ApiKeys({ api, publicBase }: { api: ApiClient; publicBase: string }) {
   const [keys, setKeys] = useState<any[]>([]);
-  const [newKey, setNewKey] = useState('');
+  const [visibleTokens, setVisibleTokens] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('only-api-visible-keys') || '{}');
+    } catch {
+      return {};
+    }
+  });
   async function load() {
     const data = await api.get('/api/api-keys');
     setKeys(data.keys);
   }
   useLoad(load, []);
+  function rememberToken(id: string, token: string) {
+    const next = { ...visibleTokens, [id]: token };
+    setVisibleTokens(next);
+    localStorage.setItem('only-api-visible-keys', JSON.stringify(next));
+  }
   async function create() {
     const name = prompt('密钥名称', '默认密钥') || '默认密钥';
     const data = await api.post('/api/api-keys', { name });
-    setNewKey(data.key.token);
+    rememberToken(data.key.id, data.key.token);
     await load();
   }
   async function revoke(id: string) {
+    if (!confirm('确定删除这个 API Key？删除后该 Key 将无法继续使用。')) return;
     await api.delete(`/api/api-keys/${id}`);
+    const next = { ...visibleTokens };
+    delete next[id];
+    setVisibleTokens(next);
+    localStorage.setItem('only-api-visible-keys', JSON.stringify(next));
     await load();
   }
   return (
@@ -469,8 +534,25 @@ function ApiKeys({ api, publicBase }: { api: ApiClient; publicBase: string }) {
         </div>
         <button className="primaryBtn" onClick={create}><Plus />新建</button>
       </div>
-      {newKey && <div className="copyBox"><code>{newKey}</code><button onClick={() => navigator.clipboard.writeText(newKey)}><Copy /></button></div>}
-      <div className="panel"><DataTable rows={keys} columns={['name', 'key_prefix', 'status', 'last_used_at', 'created_at']} action={(row) => <button className="iconBtn danger" onClick={() => revoke(row.id)}><Trash2 /></button>} /></div>
+      <div className="panel">
+        {keys.length ? keys.map((row) => {
+          const token = row.token || visibleTokens[row.id] || '';
+          const shown = token || `${row.key_prefix}...`;
+          return (
+            <div className="keyRow" key={row.id}>
+              <div>
+                <strong>{row.name}</strong>
+                <code>{shown}</code>
+                <span>{row.last_used_at ? `最近使用：${formatCell(row.last_used_at)}` : `创建：${formatCell(row.created_at)}`}</span>
+              </div>
+              <div className="rowActions">
+                <button className="iconBtn" onClick={() => navigator.clipboard.writeText(token || row.key_prefix)} title="复制"><Copy /></button>
+                <button className="iconBtn danger" onClick={() => revoke(row.id)} title="删除"><Trash2 /></button>
+              </div>
+            </div>
+          );
+        }) : <div className="empty">暂无 API Key</div>}
+      </div>
     </section>
   );
 }
@@ -555,12 +637,16 @@ function StatusBlocks({ rows }: { rows: any[] }) {
 
 function Models({ api, admin }: { api: ApiClient; admin: boolean }) {
   const [models, setModels] = useState<any[]>([]);
+  const [channels, setChannels] = useState<any[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [batch, setBatch] = useState({ channel_id: '', models: '', action: 'add' });
   const [cleaning, setCleaning] = useState(false);
   async function load() {
     const data = await api.get('/api/models');
     const rows = data.models || [];
     setModels(rows);
+    setChannels(data.channels || []);
     setDrafts(Object.fromEntries(rows.map((model: any) => [model.id, model.display_name || model.model_id])));
   }
   useLoad(load, []);
@@ -572,6 +658,12 @@ function Models({ api, admin }: { api: ApiClient; admin: boolean }) {
   }
   async function removeModel(model: any) {
     await api.delete(`/api/admin/models/${model.id}`);
+    await load();
+  }
+  async function applyBatch() {
+    if (!batch.channel_id || !batch.models.trim()) return;
+    await api.post('/api/admin/models/batch', batch);
+    setBatch({ ...batch, models: '' });
     await load();
   }
   async function cleanupOrphans() {
@@ -602,15 +694,32 @@ function Models({ api, admin }: { api: ApiClient; admin: boolean }) {
           )}
         </div>
         <p>渠道测试成功后会自动从上游 `/models` 同步模型。这里显示的模型名会返回给 SillyTavern；如需别名，可直接修改显示名。</p>
+        {admin && (
+          <div className="batchBox">
+            <select value={batch.channel_id} onChange={(event) => setBatch({ ...batch, channel_id: event.target.value })}>
+              <option value="">选择渠道</option>
+              {channels.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}
+            </select>
+            <select value={batch.action} onChange={(event) => setBatch({ ...batch, action: event.target.value })}>
+              <option value="add">批量添加</option>
+              <option value="delete">批量删除</option>
+            </select>
+            <textarea value={batch.models} placeholder="每行一个模型名，也可用逗号分隔" onChange={(event) => setBatch({ ...batch, models: event.target.value })} />
+            <button className="smallBtn" onClick={applyBatch}><Save />执行</button>
+          </div>
+        )}
         <div className="modelGroups">
-          {Object.entries(grouped).length ? Object.entries(grouped).map(([channelName, rows]) => (
+          {Object.entries(grouped).length ? Object.entries(grouped).map(([channelName, rows]) => {
+            const expanded = expandedGroups[channelName] || rows.length <= 5;
+            const visibleRows = expanded ? rows : rows.slice(0, 5);
+            return (
             <div className="modelGroup" key={channelName}>
               <div>
                 <strong>{channelName}</strong>
                 <span>{rows.length} 个模型</span>
               </div>
               <div className="modelChips">
-                {rows.map((model) => (
+                {visibleRows.map((model) => (
                   <div className="modelEditor" key={model.id || model.model_id}>
                     <div className="modelEditorBody">
                       {admin ? (
@@ -634,8 +743,13 @@ function Models({ api, admin }: { api: ApiClient; admin: boolean }) {
                   </div>
                 ))}
               </div>
+              {rows.length > 5 && (
+                <button className="smallBtn foldBtn" onClick={() => setExpandedGroups({ ...expandedGroups, [channelName]: !expandedGroups[channelName] })}>
+                  {expandedGroups[channelName] ? '收起模型' : `展开全部 ${rows.length} 个模型`}
+                </button>
+              )}
             </div>
-          )) : <div className="empty">暂无模型。请到渠道设置里测试渠道，同步成功后会显示在这里。</div>}
+          );}) : <div className="empty">暂无模型。请到渠道设置里测试渠道，同步成功后会显示在这里。</div>}
         </div>
       </div>
     </section>
@@ -666,8 +780,7 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
           document.documentElement.dataset.theme = themeName;
           setForm({ ...form, themeName });
         }} />
-        <Segmented value={form.appMode} options={[['self', '自用配置'], ['multi', '多人配置']]} onChange={(appMode) => setForm({ ...form, appMode: appMode as 'self' | 'multi', emailVerificationEnabled: appMode === 'multi' })} />
-        <p className="hintText">自用配置默认关闭邮箱验证；多人配置默认启用邮箱验证，可按需要手动调整。</p>
+        <p className="hintText">注册、邮箱验证、人机验证和推送均默认关闭，需要时可单独开启。</p>
         <Toggle label="开放注册" checked={form.registrationEnabled} onChange={(registrationEnabled) => setForm({ ...form, registrationEnabled })} />
         <Toggle label="邮箱验证" checked={form.emailVerificationEnabled} onChange={(emailVerificationEnabled) => setForm({ ...form, emailVerificationEnabled })} />
         <Toggle label="邮箱后缀验证" checked={form.emailDomainValidationEnabled} onChange={(emailDomainValidationEnabled) => setForm({ ...form, emailDomainValidationEnabled })} />
@@ -685,6 +798,22 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
             <button className="smallBtn" onClick={() => testNotify('telegram')} disabled={testingNotify === 'telegram'}><RefreshCw className={testingNotify === 'telegram' ? 'spin' : ''} />测试 Telegram</button>
             <button className="smallBtn" onClick={() => testNotify('wxpusher')} disabled={testingNotify === 'wxpusher'}><RefreshCw className={testingNotify === 'wxpusher' ? 'spin' : ''} />测试 WxPusher</button>
           </div>
+        </div>
+        <div className="settingsSection">
+          <strong>前端 Umami</strong>
+          <p className="hintText">用于统计 Pages 控制台访问。也可用 Pages 变量 `VITE_UMAMI_SCRIPT_URL`、`VITE_UMAMI_WEBSITE_ID`、`VITE_UMAMI_HOST_URL` 作为备用值。</p>
+          <Toggle label="启用前端 Umami" checked={form.frontendUmamiEnabled} onChange={(frontendUmamiEnabled) => setForm({ ...form, frontendUmamiEnabled })} />
+          <Input label="前端 Website ID" value={form.frontendUmamiWebsiteId || ''} onChange={(frontendUmamiWebsiteId) => setForm({ ...form, frontendUmamiWebsiteId })} />
+          <Input label="前端 Script URL" value={form.frontendUmamiScriptUrl || ''} placeholder="https://cloud.umami.is/script.js" onChange={(frontendUmamiScriptUrl) => setForm({ ...form, frontendUmamiScriptUrl })} />
+          <Input label="前端 Host URL（可选）" value={form.frontendUmamiHostUrl || ''} placeholder="https://cloud.umami.is" onChange={(frontendUmamiHostUrl) => setForm({ ...form, frontendUmamiHostUrl })} />
+        </div>
+        <div className="settingsSection">
+          <strong>后端 Umami</strong>
+          <p className="hintText">用于统计 Worker 请求。也可用 Worker 变量 `UMAMI_BACKEND_ENABLED`、`UMAMI_BACKEND_HOST_URL`、`UMAMI_BACKEND_WEBSITE_ID`、`UMAMI_BACKEND_HOSTNAME` 覆盖这里的设置。</p>
+          <Toggle label="启用后端 Umami" checked={form.backendUmamiEnabled} onChange={(backendUmamiEnabled) => setForm({ ...form, backendUmamiEnabled })} />
+          <Input label="后端 Website ID" value={form.backendUmamiWebsiteId || ''} onChange={(backendUmamiWebsiteId) => setForm({ ...form, backendUmamiWebsiteId })} />
+          <Input label="后端 Host URL" value={form.backendUmamiHostUrl || ''} placeholder="https://cloud.umami.is" onChange={(backendUmamiHostUrl) => setForm({ ...form, backendUmamiHostUrl })} />
+          <Input label="后端 Hostname（可选）" value={form.backendUmamiHostname || ''} placeholder="api.example.com" onChange={(backendUmamiHostname) => setForm({ ...form, backendUmamiHostname })} />
         </div>
         <button className="primaryBtn" onClick={save}><Save />保存设置</button>
       </div>
@@ -721,12 +850,20 @@ function UsersPage({ api }: { api: ApiClient }) {
     await api.patch(`/api/admin/users/${row.id}`, { ...row, ...patch });
     await load();
   }
+  async function remove(row: any) {
+    if (!confirm(`确定删除用户 ${row.email}？`)) return;
+    await api.delete(`/api/admin/users/${row.id}`);
+    await load();
+  }
   return (
     <section className="content">
       <div className="panel">
         <h2>用户设置</h2>
         <DataTable rows={users} columns={['email', 'name', 'role', 'status', 'email_verified_at', 'created_at']} action={(row) => (
-          <button className="smallBtn" onClick={() => update(row, { status: row.status === 'active' ? 'disabled' : 'active' })}>{row.status === 'active' ? '停用' : '启用'}</button>
+          <div className="rowActions">
+            <button className="smallBtn" onClick={() => update(row, { status: row.status === 'active' ? 'disabled' : 'active' })}>{row.status === 'active' ? '停用' : '启用'}</button>
+            {row.role !== 'super_admin' && <button className="iconBtn danger" onClick={() => remove(row)} title="删除"><Trash2 /></button>}
+          </div>
         )} />
       </div>
     </section>
@@ -783,7 +920,7 @@ function Channels({ api }: { api: ApiClient }) {
       </form>
       <div className="panel">
         <div className="toolbar compact"><h2>渠道列表</h2><button className="smallBtn" onClick={check} disabled={checkingAll}><RefreshCw className={checkingAll ? 'spin' : ''} />{checkingAll ? '检测中' : '立即检测'}</button></div>
-        <DataTable rows={channels} columns={['name', 'base_url', 'priority', 'status', 'health_status', 'last_checked_at']} action={(row) => <div className="rowActions"><button className="smallBtn" onClick={() => testChannel(row.id)} disabled={testingId === row.id}><RefreshCw className={testingId === row.id ? 'spin' : ''} />测试</button><button className="iconBtn danger" onClick={() => remove(row.id)} title="删除"><Trash2 /></button></div>} />
+        <DataTable rows={channels} columns={['name', 'base_url', 'working_url', 'health_latency_ms', 'priority', 'status', 'health_status', 'last_checked_at']} action={(row) => <div className="rowActions"><button className="smallBtn" onClick={() => testChannel(row.id)} disabled={testingId === row.id}><RefreshCw className={testingId === row.id ? 'spin' : ''} />测试</button><button className="iconBtn danger" onClick={() => remove(row.id)} title="删除"><Trash2 /></button></div>} />
       </div>
     </section>
   );
@@ -847,8 +984,8 @@ function DataTable({ rows, columns, action }: { rows: any[]; columns: string[]; 
   );
 }
 
-function Input({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
-  return <label className="field"><span>{label}</span><input type={type} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+function Input({ label, value, onChange, type = 'text', placeholder = '' }: { label: string; value: string; onChange: (value: string) => void; type?: string; placeholder?: string }) {
+  return <label className="field"><span>{label}</span><input type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} /></label>;
 }
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
@@ -984,6 +1121,8 @@ function labelOf(key: string) {
     priority: '优先级',
     health_status: '健康',
     last_checked_at: '检测时间',
+    working_url: '成功调用 URL',
+    health_latency_ms: '延迟(ms)',
     requests: '请求',
     errors: '错误',
     cpu_time_ms: 'CPU',

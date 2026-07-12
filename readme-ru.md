@@ -1,6 +1,6 @@
 # Only API
 
-Only API это OpenAI-совместимый API-шлюз для Cloudflare Workers + Pages. Проект включает Worker-бэкенд, Pages-фронтенд, базу D1, вход пользователей, регистрацию, выдачу API Key, управление каналами, площадь моделей, статистику использования, мониторинг использования Workers и необязательные уведомления Telegram / WxPusher.
+Only API это OpenAI-совместимый API-шлюз для Cloudflare Workers + Pages. Проект включает Worker-бэкенд, Pages-фронтенд, базу D1, вход пользователей, регистрацию, выдачу API Key, управление каналами, площадь моделей, статистику использования, мониторинг использования Workers, необязательные уведомления Telegram / WxPusher и необязательную аналитику Umami.
 
 При прямом обращении к upstream API могут возникать высокая задержка или ошибки соединения, если его узлы находятся далеко или сетевой маршрут нестабилен. Only API перенаправляет запросы через Cloudflare и в некоторых случаях может улучшить качество соединения. Кроме того, несколько OpenAI-совместимых провайдеров можно объединить за одним API endpoint, чтобы клиенты обращались к моделям разных каналов по одному адресу.
 
@@ -42,6 +42,7 @@ Only API это OpenAI-совместимый API-шлюз для Cloudflare Wor
 - Статистика за 3 часа, 1 день, 7 дней, 15 дней и за все время.
 - Страница Workers показывает процент использования и оставшийся процент.
 - Использование Workers проверяется по умолчанию каждые 6 часов и может отправляться в Telegram или WxPusher.
+- Необязательная аналитика Umami отдельно для Pages-фронтенда и Worker-бэкенда.
 - Время во фронтенде отображается с поправкой UTC+8.
 - Темы: черно-белая, светло-синяя с белым, желто-фиолетовая, зелено-красная и розово-оранжевая.
 - Необязательное фоновое изображение фронтенда по URL.
@@ -141,6 +142,17 @@ apps/api/migrations/0001_initial.sql
 
 Поддерживаются псевдонимы `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CF_ZONE_ID`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN` и `CLOUDFLARE_TOKEN`.
 
+Необязательные переменные backend Umami:
+
+| Имя | Тип | Назначение |
+| --- | --- | --- |
+| `UMAMI_BACKEND_ENABLED` | Переменная | установите `true`, чтобы включить статистику Worker-бэкенда |
+| `UMAMI_BACKEND_HOST_URL` | Переменная | URL хоста Umami, например `https://cloud.umami.is` |
+| `UMAMI_BACKEND_WEBSITE_ID` | Переменная | Umami Website ID для backend-статистики |
+| `UMAMI_BACKEND_HOSTNAME` | Переменная | необязательное имя хоста в Umami, например `api.example.com` |
+
+Backend Umami также можно настроить в системных настройках. Переменные Worker имеют приоритет над системными настройками.
+
 Переменные уведомлений Telegram:
 
 | Имя | Тип | Назначение |
@@ -185,6 +197,9 @@ VITE_API_BASE_URL=https://your-worker-domain.workers.dev
 ```txt
 VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
 VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
+VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
+VITE_UMAMI_WEBSITE_ID=your-frontend-umami-website-id
+VITE_UMAMI_HOST_URL=https://cloud.umami.is
 ```
 
 После развертывания Pages установите переменную Worker `APP_ORIGIN` равной URL Pages.
@@ -213,6 +228,14 @@ VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
 - В режиме личного использования проверка email по умолчанию отключена.
 - В режиме нескольких пользователей проверка email по умолчанию включена.
 - Проверка домена email и цифрового префикса QQ email включены по умолчанию.
+
+## Аналитика Umami
+
+Frontend Umami считает посещения Pages-консоли. Настройте его в системных настройках или используйте переменные Pages `VITE_UMAMI_SCRIPT_URL`, `VITE_UMAMI_WEBSITE_ID` и `VITE_UMAMI_HOST_URL`.
+
+Backend Umami считает Worker-запросы как события `backend_request`. Настройте его в системных настройках или используйте переменные Worker `UMAMI_BACKEND_ENABLED`, `UMAMI_BACKEND_HOST_URL`, `UMAMI_BACKEND_WEBSITE_ID` и `UMAMI_BACKEND_HOSTNAME`.
+
+Backend-статистика не отправляет email пользователя, API Key или тело запроса. Отправляются только категория маршрута, метод, статус-код и задержка.
 
 ## Использование Workers и уведомления
 

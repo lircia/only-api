@@ -1,6 +1,6 @@
 # Only API
 
-Το Only API είναι μια πύλη API συμβατή με OpenAI για Cloudflare Workers + Pages. Περιλαμβάνει Worker backend, Pages frontend, βάση D1, σύνδεση χρηστών, εγγραφή, διανομή API Key, διαχείριση καναλιών, πλατεία μοντέλων, στατιστικά χρήσης, παρακολούθηση χρήσης Workers και προαιρετικές ειδοποιήσεις Telegram / WxPusher.
+Το Only API είναι μια πύλη API συμβατή με OpenAI για Cloudflare Workers + Pages. Περιλαμβάνει Worker backend, Pages frontend, βάση D1, σύνδεση χρηστών, εγγραφή, διανομή API Key, διαχείριση καναλιών, πλατεία μοντέλων, στατιστικά χρήσης, παρακολούθηση χρήσης Workers, προαιρετικές ειδοποιήσεις Telegram / WxPusher και προαιρετικά στατιστικά Umami.
 
 Οι απευθείας κλήσεις σε ένα upstream API μπορεί να παρουσιάζουν μεγάλη καθυστέρηση ή αποτυχίες σύνδεσης όταν οι κόμβοι της υπηρεσίας βρίσκονται μακριά ή η διαδρομή δικτύου είναι ασταθής. Το Only API προωθεί τα αιτήματα μέσω Cloudflare και μπορεί να βελτιώσει τη συνδεσιμότητα σε τέτοιες περιπτώσεις. Μπορεί επίσης να συγκεντρώσει πολλούς παρόχους συμβατούς με OpenAI πίσω από ένα API endpoint, ώστε οι πελάτες να χρησιμοποιούν μία διεύθυνση για μοντέλα από διαφορετικά κανάλια.
 
@@ -42,6 +42,7 @@
 - Στατιστικά χρήσης για 3 ώρες, 1 ημέρα, 7 ημέρες, 15 ημέρες και συνολικά.
 - Η σελίδα Workers δείχνει ποσοστό χρήσης και ποσοστό υπολοίπου.
 - Η χρήση Workers ελέγχεται προεπιλεγμένα κάθε 6 ώρες και μπορεί να αποσταλεί σε Telegram ή WxPusher.
+- Προαιρετικά στατιστικά Umami χωριστά για το Pages frontend και το Worker backend.
 - Η ώρα στο frontend εμφανίζεται με προσαρμογή UTC+8.
 - Ενσωματωμένα θέματα: μαύρο-λευκό, ανοιχτό μπλε-λευκό, κίτρινο-μωβ, πράσινο-κόκκινο και ροζ-πορτοκαλί.
 - Προαιρετική εικόνα φόντου frontend μέσω URL.
@@ -141,6 +142,17 @@ apps/api/migrations/0001_initial.sql
 
 Γίνονται δεκτά και τα alias `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CF_ZONE_ID`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN` και `CLOUDFLARE_TOKEN`.
 
+Προαιρετικές μεταβλητές backend Umami:
+
+| Όνομα | Τύπος | Σκοπός |
+| --- | --- | --- |
+| `UMAMI_BACKEND_ENABLED` | Variable | όρισε `true` για ενεργοποίηση στατιστικών Worker backend |
+| `UMAMI_BACKEND_HOST_URL` | Variable | URL host του Umami, για παράδειγμα `https://cloud.umami.is` |
+| `UMAMI_BACKEND_WEBSITE_ID` | Variable | Umami Website ID για backend tracking |
+| `UMAMI_BACKEND_HOSTNAME` | Variable | προαιρετικό hostname που εμφανίζεται στο Umami, π.χ. `api.example.com` |
+
+Το backend Umami μπορεί επίσης να ρυθμιστεί στις ρυθμίσεις συστήματος. Οι μεταβλητές Worker υπερισχύουν των ρυθμίσεων συστήματος.
+
 Μεταβλητές ειδοποιήσεων Telegram:
 
 | Όνομα | Τύπος | Σκοπός |
@@ -185,6 +197,9 @@ VITE_API_BASE_URL=https://your-worker-domain.workers.dev
 ```txt
 VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
 VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
+VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
+VITE_UMAMI_WEBSITE_ID=your-frontend-umami-website-id
+VITE_UMAMI_HOST_URL=https://cloud.umami.is
 ```
 
 Μετά την ανάπτυξη Pages, όρισε τη μεταβλητή Worker `APP_ORIGIN` στο Pages URL.
@@ -213,6 +228,14 @@ VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
 - Στη λειτουργία προσωπικής χρήσης η επαλήθευση email είναι προεπιλεγμένα κλειστή.
 - Στη λειτουργία πολλών χρηστών η επαλήθευση email είναι προεπιλεγμένα ενεργή.
 - Ο έλεγχος κατάληξης email και ο έλεγχος αριθμητικού προθέματος QQ email είναι προεπιλεγμένα ενεργοί.
+
+## Στατιστικά Umami
+
+Το frontend Umami καταγράφει επισκέψεις στην κονσόλα Pages. Ρύθμισέ το στις ρυθμίσεις συστήματος ή χρησιμοποίησε τις μεταβλητές Pages `VITE_UMAMI_SCRIPT_URL`, `VITE_UMAMI_WEBSITE_ID` και `VITE_UMAMI_HOST_URL`.
+
+Το backend Umami καταγράφει Worker αιτήματα ως γεγονότα `backend_request`. Ρύθμισέ το στις ρυθμίσεις συστήματος ή χρησιμοποίησε τις μεταβλητές Worker `UMAMI_BACKEND_ENABLED`, `UMAMI_BACKEND_HOST_URL`, `UMAMI_BACKEND_WEBSITE_ID` και `UMAMI_BACKEND_HOSTNAME`.
+
+Το backend tracking δεν στέλνει email χρήστη, API Key ή σώμα αιτήματος. Στέλνει μόνο κατηγορία διαδρομής, μέθοδο, status code και καθυστέρηση.
 
 ## Χρήση Workers και ειδοποιήσεις
 

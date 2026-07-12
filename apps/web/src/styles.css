@@ -975,3 +975,73 @@ code {
     overflow-x: auto;
   }
 }
+
+
+.keyRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.keyRow:last-child {
+  border-bottom: 0;
+}
+
+.keyRow > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.keyRow code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.keyRow span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.batchBox {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 140px auto;
+  gap: 10px;
+  align-items: start;
+  margin: 14px 0;
+}
+
+.batchBox select,
+.batchBox textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--field);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.batchBox textarea {
+  grid-column: 1 / -1;
+  min-height: 92px;
+  resize: vertical;
+}
+
+.foldBtn {
+  margin-top: 10px;
+}
+
+@media (max-width: 760px) {
+  .keyRow {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .batchBox {
+    grid-template-columns: 1fr;
+  }
+}

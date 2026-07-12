@@ -1,6 +1,6 @@
 # Only API
 
-Only API は、Cloudflare Workers + Pages にデプロイできる OpenAI 互換 API ゲートウェイです。Worker バックエンド、Pages フロントエンド、D1 データベース、ユーザーログイン、登録、API Key 配布、チャネル管理、モデル広場、利用統計、Workers 利用量監視、任意の Telegram / WxPusher 通知を含みます。
+Only API は、Cloudflare Workers + Pages にデプロイできる OpenAI 互換 API ゲートウェイです。Worker バックエンド、Pages フロントエンド、D1 データベース、ユーザーログイン、登録、API Key 配布、チャネル管理、モデル広場、利用統計、Workers 利用量監視、任意の Telegram / WxPusher 通知、任意の Umami 統計を含みます。
 
 上流 API のサービス拠点が遠い場合やネットワーク経路が不安定な場合、直接呼び出すと遅延の増大や接続失敗が発生することがあります。Only API は Cloudflare 経由でリクエストを転送し、このような状況で接続性を改善できる場合があります。また、複数の OpenAI 互換プロバイダーを 1 つの API エンドポイントにまとめ、クライアントから 1 つのアドレスで異なるチャネルのモデルへアクセスできます。
 
@@ -42,6 +42,7 @@ Only API は、Cloudflare Workers + Pages にデプロイできる OpenAI 互換
 - 3 時間、1 日、7 日、15 日、全期間の利用統計。
 - Workers 利用量ページは使用済み割合と残り割合を表示します。
 - Workers 利用量は既定で 6 時間ごとに取得し、Telegram または WxPusher へ通知できます。
+- Pages フロントエンドと Worker バックエンドを別々に Umami 統計へ接続できます。
 - フロントエンドの時刻表示は UTC+8 に補正されます。
 - 黒白、淡い青白、黄紫、緑赤、ピンク橙のテーマ。
 - 画像 URL によるフロントエンド背景画像。
@@ -141,6 +142,17 @@ Worker 設定で D1 をバインドします：
 
 別名として `CLOUDFLARE_ACCOUNT_ID`、`CF_ACCOUNT_TAG`、`CLOUDFLARE_ACCOUNT_TAG`、`CF_ZONE_ID`、`CLOUDFLARE_ZONE_ID`、`CLOUDFLARE_API_TOKEN`、`CF_TOKEN`、`CLOUDFLARE_TOKEN` も使えます。
 
+任意のバックエンド Umami 変数：
+
+| 名前 | 種類 | 用途 |
+| --- | --- | --- |
+| `UMAMI_BACKEND_ENABLED` | 変数 | `true` にすると Worker バックエンド統計を有効化 |
+| `UMAMI_BACKEND_HOST_URL` | 変数 | Umami のホスト URL。例 `https://cloud.umami.is` |
+| `UMAMI_BACKEND_WEBSITE_ID` | 変数 | バックエンド統計用の Umami Website ID |
+| `UMAMI_BACKEND_HOSTNAME` | 変数 | Umami に表示する任意のホスト名。例 `api.example.com` |
+
+バックエンド Umami はシステム設定でも入力できます。Worker 変数はシステム設定より優先されます。
+
 Telegram 通知変数：
 
 | 名前 | 種類 | 用途 |
@@ -185,6 +197,9 @@ VITE_API_BASE_URL=https://your-worker-domain.workers.dev
 ```txt
 VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
 VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
+VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
+VITE_UMAMI_WEBSITE_ID=your-frontend-umami-website-id
+VITE_UMAMI_HOST_URL=https://cloud.umami.is
 ```
 
 Pages のデプロイ後、Worker 変数 `APP_ORIGIN` を Pages URL に設定します。
@@ -213,6 +228,14 @@ Pages フロントエンド URL を開くと、初回のみ設定ページが表
 - 個人利用モードではメール認証は既定で無効です。
 - 複数ユーザーモードではメール認証は既定で有効です。
 - メールドメイン検証と QQ メール数字プレフィックス検証は既定で有効です。
+
+## Umami 統計
+
+フロントエンド Umami は Pages コンソールへのアクセスを計測します。システム設定で入力するか、Pages 変数 `VITE_UMAMI_SCRIPT_URL`、`VITE_UMAMI_WEBSITE_ID`、`VITE_UMAMI_HOST_URL` を使います。
+
+バックエンド Umami は Worker リクエストを `backend_request` イベントとして計測します。システム設定で入力するか、Worker 変数 `UMAMI_BACKEND_ENABLED`、`UMAMI_BACKEND_HOST_URL`、`UMAMI_BACKEND_WEBSITE_ID`、`UMAMI_BACKEND_HOSTNAME` を使います。
+
+バックエンド統計はユーザーのメール、API Key、リクエスト本文を送信しません。送信するのはルート分類、メソッド、ステータスコード、処理時間だけです。
 
 ## Workers 利用量と通知
 

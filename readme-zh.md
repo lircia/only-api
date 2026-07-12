@@ -1,6 +1,6 @@
 # Only API
 
-Only API 是一个可部署到 Cloudflare Workers + Pages 的 OpenAI 兼容 API 中转项目。它包含 Worker 后端、Pages 前端、D1 数据库、用户登录、用户注册、API Key 分发、渠道管理、模型广场、用量统计、Workers 用量监测，以及可选的 Telegram / WxPusher 推送。
+Only API 是一个可部署到 Cloudflare Workers + Pages 的 OpenAI 兼容 API 中转项目。它包含 Worker 后端、Pages 前端、D1 数据库、用户登录、用户注册、API Key 分发、渠道管理、模型广场、用量统计、Workers 用量监测、可选的 Telegram / WxPusher 推送，以及可选的 Umami 统计。
 
 当上游 API 的服务节点距离较远或网络连接不稳定时，直接调用可能出现延迟过高、连接失败等问题。Only API 可借助 Cloudflare 转发请求，在一定程度上改善访问体验。
 同时，它可以将多个兼容 OpenAI 的厂商渠道集中到同一个 API 调用地址，让客户端通过一个地址访问不同渠道提供的模型。
@@ -43,6 +43,7 @@ Only API 是一个可部署到 Cloudflare Workers + Pages 的 OpenAI 兼容 API 
 - 支持 3 小时、1 日、7 日、15 日和总览用量统计。
 - Workers 用量页显示已用百分比和剩余百分比。
 - Workers 用量默认每 6 小时采集一次，并可推送到 Telegram 或 WxPusher。
+- 支持前端 Pages 和后端 Worker 分别接入 Umami 统计。
 - 前端时间统一按 UTC+8 显示。
 - 内置黑白、浅蓝白、黄紫、绿红、粉橙主题。
 - 支持通过图片 URL 设置前端背景图。
@@ -142,6 +143,17 @@ Worker 必要变量：
 
 也支持这些别名：`CLOUDFLARE_ACCOUNT_ID`、`CF_ACCOUNT_TAG`、`CLOUDFLARE_ACCOUNT_TAG`、`CF_ZONE_ID`、`CLOUDFLARE_ZONE_ID`、`CLOUDFLARE_API_TOKEN`、`CF_TOKEN`、`CLOUDFLARE_TOKEN`。
 
+可选后端 Umami 变量：
+
+| 名称 | 类型 | 用途 |
+| --- | --- | --- |
+| `UMAMI_BACKEND_ENABLED` | 变量 | 填 `true` 后启用 Worker 后端统计 |
+| `UMAMI_BACKEND_HOST_URL` | 变量 | Umami 地址，例如 `https://cloud.umami.is` |
+| `UMAMI_BACKEND_WEBSITE_ID` | 变量 | 后端统计使用的 Umami Website ID |
+| `UMAMI_BACKEND_HOSTNAME` | 变量 | Umami 中显示的后端域名，例如 `api.example.com` |
+
+后端 Umami 也可以在系统设置里填写。Worker 变量会覆盖系统设置。
+
 Telegram 推送变量：
 
 | 名称 | 类型 | 用途 |
@@ -186,6 +198,9 @@ Pages 可选变量：
 ```txt
 VITE_TURNSTILE_SITE_KEY=你的-turnstile-site-key
 VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
+VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
+VITE_UMAMI_WEBSITE_ID=你的前端-umami-website-id
+VITE_UMAMI_HOST_URL=https://cloud.umami.is
 ```
 
 Pages 部署完成后，把 Worker 变量 `APP_ORIGIN` 设置为 Pages 前端地址。
@@ -214,6 +229,14 @@ Pages 部署完成后，把 Worker 变量 `APP_ORIGIN` 设置为 Pages 前端地
 - 自用配置默认关闭邮箱验证。
 - 多人配置默认开启邮箱验证。
 - 邮箱后缀验证和 QQ 邮箱数字前缀验证默认开启。
+
+## Umami 统计
+
+前端 Umami 用于统计 Pages 控制台访问。可以在系统设置中填写，也可以使用 Pages 变量 `VITE_UMAMI_SCRIPT_URL`、`VITE_UMAMI_WEBSITE_ID`、`VITE_UMAMI_HOST_URL`。
+
+后端 Umami 用于统计 Worker 请求，会发送 `backend_request` 事件。可以在系统设置中填写，也可以使用 Worker 变量 `UMAMI_BACKEND_ENABLED`、`UMAMI_BACKEND_HOST_URL`、`UMAMI_BACKEND_WEBSITE_ID`、`UMAMI_BACKEND_HOSTNAME`。
+
+后端统计不会发送用户邮箱、API Key 或请求正文，只发送路径类别、请求方法、状态码和耗时。
 
 ## Workers 用量和推送
 
