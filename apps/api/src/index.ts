@@ -130,7 +130,7 @@ export default {
         return response;
       }
 
-      response = withCors(json({ ok: true, service: 'only-api-worker' }), env);
+      response = withCors(json({ ok: true, service: 'only-api' }), env);
       ctx.waitUntil(trackBackendUmami(env, request, response, started));
       return response;
     } catch (error) {
@@ -471,7 +471,7 @@ async function getUsageSummary(env: Env, user: AuthedUser): Promise<Response> {
       success_rate: requests ? `${Math.round(((requests - errors) / requests) * 100)}%` : '—'
     });
   }
-  const [modelRows, hourlyRows, statusRows] = await Promise.all([
+  const [modelRows, hourlyRows, statusRows, apiKeyRows, userRows] = await Promise.all([
     env.DB.prepare(
       `SELECT COALESCE(NULLIF(model, ''), 'unknown') AS model,
         COUNT(*) AS requests,
@@ -498,6 +498,38 @@ async function getUsageSummary(env: Env, user: AuthedUser): Promise<Response> {
        GROUP BY status
        ORDER BY requests DESC
        LIMIT 12`
+    ).bind(...userBinds).all<any>(),
+    env.DB.prepare(
+      `SELECT
+        COALESCE(NULLIF(k.name, ''), '已删除 API Key') AS api_key_name,
+        COALESCE(NULLIF(u.email, ''), '已删除用户') AS user_email,
+        COALESCE(u.name, '') AS user_name,
+        COUNT(*) AS requests,
+        COALESCE(SUM(l.total_tokens),0) AS tokens,
+        COALESCE(AVG(l.latency_ms),0) AS latency,
+        COALESCE(SUM(CASE WHEN l.status >= 400 THEN 1 ELSE 0 END),0) AS errors
+       FROM usage_logs l
+       LEFT JOIN api_keys k ON k.id = l.api_key_id
+       LEFT JOIN users u ON u.id = l.user_id
+       ${admin ? '' : 'WHERE l.user_id = ?'}
+       GROUP BY l.api_key_id, k.name, l.user_id, u.email, u.name
+       ORDER BY requests DESC
+       LIMIT 100`
+    ).bind(...userBinds).all<any>(),
+    env.DB.prepare(
+      `SELECT
+        COALESCE(NULLIF(u.email, ''), '已删除用户') AS user_email,
+        COALESCE(u.name, '') AS user_name,
+        COUNT(*) AS requests,
+        COALESCE(SUM(l.total_tokens),0) AS tokens,
+        COALESCE(AVG(l.latency_ms),0) AS latency,
+        COALESCE(SUM(CASE WHEN l.status >= 400 THEN 1 ELSE 0 END),0) AS errors
+       FROM usage_logs l
+       LEFT JOIN users u ON u.id = l.user_id
+       ${admin ? '' : 'WHERE l.user_id = ?'}
+       GROUP BY l.user_id, u.email, u.name
+       ORDER BY requests DESC
+       LIMIT 100`
     ).bind(...userBinds).all<any>()
   ]);
   const normalizedModelRows = (modelRows.results || []).map((row: any) => {
@@ -512,11 +544,25 @@ async function getUsageSummary(env: Env, user: AuthedUser): Promise<Response> {
       success_rate: requests ? `${Math.round(((requests - errors) / requests) * 100)}%` : '—'
     };
   });
+  const normalizeBreakdown = (input: any[]) => input.map((row: any) => {
+    const requests = Number(row.requests || 0);
+    const errors = Number(row.errors || 0);
+    return {
+      ...row,
+      requests,
+      tokens: Number(row.tokens || 0),
+      latency: Math.round(Number(row.latency || 0)),
+      errors,
+      success_rate: requests ? `${Math.round(((requests - errors) / requests) * 100)}%` : '—'
+    };
+  });
   return json({
     rows,
     modelRows: normalizedModelRows,
     hourlyRows: hourlyRows.results || [],
-    statusRows: statusRows.results || []
+    statusRows: statusRows.results || [],
+    apiKeyRows: normalizeBreakdown(apiKeyRows.results || []),
+    userRows: normalizeBreakdown(userRows.results || [])
   });
 }
 
@@ -701,7 +747,9 @@ async function listChannels(env: Env): Promise<Response> {
   await ensureChannelRuntimeColumns(env);
   const rows = await env.DB.prepare(
     `SELECT c.id, c.name, c.provider, c.base_url, c.priority, c.status, c.health_status, c.health_message,
-      c.health_latency_ms, c.working_url, c.last_checked_at, c.created_at,
+      c.health_latency_ms, c.working_url, c.is_full_url,
+      CASE WHEN c.is_full_url = 1 THEN '是' ELSE '否' END AS full_url_mode,
+      c.last_checked_at, c.created_at,
       GROUP_CONCAT(m.model_id, char(10)) AS models
      FROM channels c
      LEFT JOIN model_catalog m ON m.channel_id = c.id AND m.status = "enabled"
@@ -716,9 +764,11 @@ async function createChannel(request: Request, env: Env): Promise<Response> {
   const body = await readJson(request);
   validateChannel(body);
   const channelId = id('chn');
+  const isFullUrl = body.is_full_url === true || body.is_full_url === 1;
+  const baseUrl = isFullUrl ? String(body.base_url).trim() : normalizeBaseUrl(body.base_url);
   await env.DB.prepare(
-    'INSERT INTO channels (id, name, provider, base_url, api_key, priority, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).bind(channelId, body.name, body.provider || 'openai-compatible', normalizeBaseUrl(body.base_url), body.api_key, Number(body.priority || 100), body.status || 'active').run();
+    'INSERT INTO channels (id, name, provider, base_url, api_key, priority, status, is_full_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).bind(channelId, body.name, body.provider || 'openai-compatible', baseUrl, body.api_key, Number(body.priority || 100), body.status || 'active', isFullUrl ? 1 : 0).run();
   if (parseModels(body.models).length) await saveChannelModels(env, channelId, body.models);
   return json({ id: channelId }, 201);
 }
@@ -727,9 +777,11 @@ async function updateChannel(request: Request, env: Env, channelId: string): Pro
   await ensureChannelRuntimeColumns(env);
   const body = await readJson(request);
   validateChannel(body, true);
+  const isFullUrl = body.is_full_url === true || body.is_full_url === 1;
+  const baseUrl = isFullUrl ? String(body.base_url).trim() : normalizeBaseUrl(body.base_url);
   await env.DB.prepare(
-    'UPDATE channels SET name = ?, provider = ?, base_url = ?, api_key = ?, priority = ?, status = ?, working_url = "", health_latency_ms = 0, updated_at = ? WHERE id = ?'
-  ).bind(body.name, body.provider || 'openai-compatible', normalizeBaseUrl(body.base_url), body.api_key, Number(body.priority || 100), body.status || 'active', new Date().toISOString(), channelId).run();
+    'UPDATE channels SET name = ?, provider = ?, base_url = ?, api_key = ?, priority = ?, status = ?, is_full_url = ?, working_url = "", health_latency_ms = 0, updated_at = ? WHERE id = ?'
+  ).bind(body.name, body.provider || 'openai-compatible', baseUrl, body.api_key, Number(body.priority || 100), body.status || 'active', isFullUrl ? 1 : 0, new Date().toISOString(), channelId).run();
   if ('models' in body) await saveChannelModels(env, channelId, body.models);
   return json({ ok: true });
 }
@@ -1551,13 +1603,15 @@ function buildUpstreamUrl(baseUrl: string, apiPath: string, search = ''): string
 }
 
 function buildChannelRequestUrl(channel: any, apiPath: string, search = ''): string {
-  const workingUrl = String(channel.working_url || '').trim();
-  if (!workingUrl) return buildUpstreamUrl(channel.base_url, apiPath, search);
-  const url = new URL(workingUrl);
   if (!isCompletionPath(apiPath)) {
     return buildUpstreamUrl(channel.base_url, apiPath, search);
   }
-  url.search = search.startsWith('?') ? search.slice(1) : search;
+  const isFullUrl = Number(channel.is_full_url || 0) === 1;
+  const target = isFullUrl
+    ? String(channel.base_url || '').trim()
+    : String(channel.working_url || '').trim() || completeCompletionUrl(channel.base_url);
+  const url = new URL(target);
+  if (search) url.search = search.startsWith('?') ? search.slice(1) : search;
   return url.toString();
 }
 
@@ -1566,65 +1620,40 @@ function isCompletionPath(apiPath: string): boolean {
 }
 
 async function testChannelCompletionUrl(channel: any): Promise<{ ok: boolean; url: string; status: number; latencyMs: number; error: string }> {
-  const candidates = buildCompletionProbeUrls(channel.base_url);
-  let lastError = '';
-  for (const target of candidates) {
-    const started = Date.now();
-    try {
-      const res = await fetch(target, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${channel.api_key}`,
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'only-api-health-check',
-          messages: [{ role: 'user', content: 'ping' }],
-          max_tokens: 1,
-          stream: false
-        }),
-        signal: AbortSignal.timeout(60000)
-      });
-      const text = await res.clone().text().catch(() => '');
-      const latencyMs = Date.now() - started;
-      if (isUsableCompletionProbe(res.status, text)) {
-        return { ok: true, url: target, status: res.status, latencyMs, error: '' };
-      }
-      lastError = `${target} HTTP ${res.status}${text ? `: ${text.slice(0, 120)}` : ''}`;
-    } catch (error) {
-      lastError = `${target} ${getErrorMessage(error)}`;
+  const target = Number(channel.is_full_url || 0) === 1
+    ? String(channel.base_url || '').trim()
+    : completeCompletionUrl(channel.base_url);
+  const started = Date.now();
+  try {
+    const res = await fetch(target, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${channel.api_key}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'only-api-health-check',
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+        stream: false
+      }),
+      signal: AbortSignal.timeout(60000)
+    });
+    const text = await res.clone().text().catch(() => '');
+    const latencyMs = Date.now() - started;
+    if (isUsableCompletionProbe(res.status, text)) {
+      return { ok: true, url: target, status: res.status, latencyMs, error: '' };
     }
+    return {
+      ok: false,
+      url: '',
+      status: res.status,
+      latencyMs,
+      error: `${target} HTTP ${res.status}${text ? `: ${text.slice(0, 120)}` : ''}`
+    };
+  } catch (error) {
+    return { ok: false, url: '', status: 0, latencyMs: Date.now() - started, error: `${target} ${getErrorMessage(error)}` };
   }
-  return { ok: false, url: '', status: 0, latencyMs: 0, error: lastError || '所有候选调用 URL 均测试失败' };
-}
-
-function buildCompletionProbeUrls(baseUrl: string): string[] {
-  const raw = baseUrl.trim().replace(/\/+$/, '');
-  const suffixes = [
-    '/v1',
-    '/chat',
-    '/completions',
-    '/v1/chat',
-    '/chat/completions',
-    '/chat/comptions'
-  ];
-  const seen = new Set<string>();
-  const urls: string[] = [];
-  const add = (value: string) => {
-    try {
-      const normalized = new URL(value).toString();
-      if (!seen.has(normalized)) {
-        seen.add(normalized);
-        urls.push(normalized);
-      }
-    } catch {
-      // validateChannel catches bad URLs; keep this guard for runtime safety.
-    }
-  };
-  add(completeCompletionUrl(raw));
-  for (const suffix of suffixes) add(joinUrlPath(raw, suffix));
-  add(raw);
-  return urls;
 }
 
 function completeCompletionUrl(value: string): string {
@@ -1635,14 +1664,6 @@ function completeCompletionUrl(value: string): string {
   else if (/\/chat$/i.test(path)) path += '/completions';
   else if (!/\/(chat\/)?completions$/i.test(path) && !/\/chat\/comptions$/i.test(path)) path += '/v1/chat/completions';
   url.pathname = path || '/v1/chat/completions';
-  return url.toString();
-}
-
-function joinUrlPath(base: string, suffix: string): string {
-  const url = new URL(base);
-  const basePath = url.pathname.replace(/\/+$/, '');
-  const suffixPath = suffix.replace(/^\/+/, '');
-  url.pathname = `${basePath}/${suffixPath}`.replace(/\/{2,}/g, '/');
   return url.toString();
 }
 
@@ -1674,7 +1695,8 @@ async function ensureChannelRuntimeColumns(env: Env): Promise<void> {
   if (channelRuntimeColumnsReady) return;
   for (const sql of [
     'ALTER TABLE channels ADD COLUMN health_latency_ms INTEGER NOT NULL DEFAULT 0',
-    'ALTER TABLE channels ADD COLUMN working_url TEXT NOT NULL DEFAULT ""'
+    'ALTER TABLE channels ADD COLUMN working_url TEXT NOT NULL DEFAULT ""',
+    'ALTER TABLE channels ADD COLUMN is_full_url INTEGER NOT NULL DEFAULT 0'
   ]) {
     try {
       await env.DB.prepare(sql).run();
@@ -1750,7 +1772,7 @@ async function testBackendUmami(env: Env): Promise<Response> {
   }
 
   await sendBackendUmamiEvent(config, {
-    hostname: config.hostname || 'only-api-worker',
+    hostname: config.hostname || 'only-api',
     language: 'zh-CN',
     referrer: '',
     url: '/api/admin/umami-test',

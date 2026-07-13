@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS channels (
   health_message TEXT NOT NULL DEFAULT '',
   health_latency_ms INTEGER NOT NULL DEFAULT 0,
   working_url TEXT NOT NULL DEFAULT '',
+  is_full_url INTEGER NOT NULL DEFAULT 0,
   last_checked_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))

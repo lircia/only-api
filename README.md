@@ -37,10 +37,10 @@ This repository is designed for GitHub hosting and Cloudflare dashboard deployme
 - User API keys use the `oi-only-` prefix and support full display, copying, and deletion.
 - OpenAI-compatible `/v1/*` forwarding.
 - No user quota enforcement.
-- Per-channel health tests probe several completion URL suffixes, record the working URL and latency, and sync models from upstream `/models`.
+- Per-channel health tests use either one automatically completed `/v1/chat/completions` URL or an explicitly marked full URL, record latency, and sync models from upstream `/models`.
 - Model Square with one model per row, folding, editable display names, per-channel batch add/delete, `-all` delete-all, and orphan cleanup.
 - Admin user status/role editing and user deletion, with protection for the current user and super admin.
-- Usage statistics for 3 hours, 1 day, 7 days, 15 days, and all time.
+- Usage statistics for 3 hours, 1 day, 7 days, 15 days, and all time, with model, API Key name, and user breakdown tables.
 - Workers usage monitoring shows used percent and remaining percent.
 - With a Worker Cron Trigger, Workers usage is checked every 6 hours by default and can be pushed to Telegram or WxPusher.
 - Optional Umami analytics for the Pages frontend and Worker backend.
@@ -187,7 +187,7 @@ Optional-feature requirement summary:
 
 Scheduled trigger for automatic checks and notifications:
 
-The included `wrangler.toml` installs `0 * * * *`, which wakes the Worker once per hour. Channel checks default to every 60 minutes; each candidate completion URL may wait up to 60 seconds before moving to the next candidate. Workers usage is collected and, when notifications are enabled, pushed every 360 minutes (6 hours).
+The included `wrangler.toml` installs `0 * * * *`, which wakes the Worker once per hour. Channel checks default to every 60 minutes and the single test URL may wait up to 60 seconds. Workers usage is collected and, when notifications are enabled, pushed every 360 minutes (6 hours).
 
 ## Deployment 4: Deploy Pages Frontend
 
@@ -300,7 +300,7 @@ Use the upstream API root at the version level.
 | OpenRouter | `https://openrouter.ai/api/v1` |
 | Other compatible providers | usually `https://domain/v1` |
 
-The per-channel test first builds a normal `/v1/chat/completions` URL, then probes common suffix combinations and finally the original URL. After success it records the exact working completion URL and latency, and gateway completion requests use that recorded URL. Model synchronization still uses the channel Base URL plus `/v1/models`.
+By default the channel Base URL is completed once to `/v1/chat/completions`; no fallback suffixes are probed. Check “Full URL” when the entered address is already the complete endpoint: tests and gateway completion calls then use it unchanged. The successful URL and latency are recorded. Model synchronization still uses the channel Base URL plus `/v1/models`.
 
 In Model Square, administrators can batch add or hide model names for one selected channel. During batch deletion, enter `-all` to hide every model belonging to that channel. Hidden models can be enabled again by batch adding their names. The orphan cleanup action removes model records left by deleted channels.
 

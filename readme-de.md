@@ -37,10 +37,10 @@ Dieses Repository ist für GitHub und das Cloudflare-Dashboard gedacht. `wrangle
 - Benutzer-API-Keys verwenden das Präfix `oi-only-` und können vollständig angezeigt, kopiert und gelöscht werden.
 - OpenAI-kompatible Weiterleitung für `/v1/*`.
 - Keine Benutzerkontingente.
-- Einzelne Kanaltests prüfen mehrere Completion-URLs, speichern erfolgreiche URL und Latenz und synchronisieren Modelle über `/models`.
+- Kanaltests ergänzen normalerweise einmal `/v1/chat/completions`; im Modus „vollständige URL“ wird die Eingabe unverändert verwendet und die Latenz gespeichert.
 - Modellplatz mit Faltung, editierbaren Namen, kanalweiser Massenaddition/-löschung, `-all` zum Löschen aller Modelle und Bereinigung verwaister Modelle.
 - Administratoren können Benutzerstatus und Rollen ändern sowie normale Benutzer löschen; aktueller Benutzer und Super-Admin sind geschützt.
-- Nutzungsstatistiken für 3 Stunden, 1 Tag, 7 Tage, 15 Tage und Gesamtansicht.
+- Nutzungsstatistiken für 3 Stunden, 1 Tag, 7 Tage, 15 Tage und Gesamtansicht sowie Listen nach Modell, API-Key-Name und Benutzer.
 - Workers-Nutzung zeigt verwendeten Prozentsatz und verbleibenden Prozentsatz.
 - Mit einem Worker Cron Trigger wird die Workers-Nutzung standardmäßig alle 6 Stunden abgefragt und kann an Telegram oder WxPusher gesendet werden.
 - Optionale Umami-Analytik getrennt für Pages-Frontend und Worker-Backend.
@@ -178,7 +178,7 @@ Pflichtregeln optionaler Funktionen: E-Mail benötigt beide Resend-Variablen; Tu
 
 Erforderlicher Zeitplan für automatische Prüfungen und Benachrichtigungen:
 
-`wrangler.toml` startet den Worker mit `0 * * * *` stündlich. Kanalprüfungen laufen standardmäßig alle 60 Minuten; jede Kandidaten-URL darf bis zu 60 Sekunden warten. Workers-Nutzung wird alle 360 Minuten (6 Stunden) erfasst und bei aktivierten Benachrichtigungen im gleichen Abstand gesendet.
+`wrangler.toml` startet den Worker mit `0 * * * *` stündlich. Kanalprüfungen laufen alle 60 Minuten und die einzelne Test-URL darf bis zu 60 Sekunden warten. Workers-Nutzung wird alle 360 Minuten (6 Stunden) erfasst und bei aktivierten Benachrichtigungen gesendet.
 
 ## Deployment 4: Pages-Frontend bereitstellen
 
@@ -289,7 +289,7 @@ Trage im Kanal die Versionswurzel der Upstream-API ein.
 | OpenRouter | `https://openrouter.ai/api/v1` |
 | Andere kompatible Dienste | normalerweise `https://domain/v1` |
 
-Der Kanaltest erstellt zuerst `/v1/chat/completions`, prüft danach übliche Endungskombinationen und zuletzt die ursprüngliche URL. Erfolgreiche vollständige URL und Latenz werden gespeichert und für Completion-Anfragen verwendet. Die Modellsynchronisierung nutzt weiterhin Base URL plus `/v1/models`.
+Normalerweise wird `/v1/chat/completions` nur einmal ergänzt; weitere Endungen werden nicht getestet. Bei „vollständige URL“ verwenden Test und Completion-Aufruf die Eingabe unverändert. URL und Latenz werden gespeichert; die Modellsynchronisierung nutzt weiter Base URL plus `/v1/models`.
 
 Im Modellplatz können Administratoren Modelle eines ausgewählten Kanals gesammelt hinzufügen oder ausblenden. `-all` bei der Massenlöschung blendet alle Modelle dieses Kanals aus; erneutes Hinzufügen aktiviert sie wieder. Die Bereinigung entfernt Modelle gelöschter Kanäle.
 

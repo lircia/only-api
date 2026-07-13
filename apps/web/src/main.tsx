@@ -567,11 +567,15 @@ function ApiKeys({ api, publicBase }: { api: ApiClient; publicBase: string }) {
 function Usage({ api }: { api: ApiClient }) {
   const [rows, setRows] = useState<any[]>([]);
   const [modelRows, setModelRows] = useState<any[]>([]);
+  const [apiKeyRows, setApiKeyRows] = useState<any[]>([]);
+  const [userRows, setUserRows] = useState<any[]>([]);
   const [hourlyRows, setHourlyRows] = useState<any[]>([]);
   const [statusRows, setStatusRows] = useState<any[]>([]);
   useLoad(() => api.get('/api/usage-summary').then((data) => {
     setRows(data.rows || []);
     setModelRows(data.modelRows || []);
+    setApiKeyRows(data.apiKeyRows || []);
+    setUserRows(data.userRows || []);
     setHourlyRows(data.hourlyRows || []);
     setStatusRows(data.statusRows || []);
   }), []);
@@ -598,6 +602,14 @@ function Usage({ api }: { api: ApiClient }) {
       <div className="panel">
         <h2>模型用量表</h2>
         <DataTable rows={modelRows} columns={['model', 'requests', 'tokens', 'latency', 'errors', 'success_rate']} />
+      </div>
+      <div className="panel">
+        <h2>API Key 用量表</h2>
+        <DataTable rows={apiKeyRows} columns={['api_key_name', 'user_email', 'user_name', 'requests', 'tokens', 'latency', 'errors', 'success_rate']} />
+      </div>
+      <div className="panel">
+        <h2>用户用量表</h2>
+        <DataTable rows={userRows} columns={['user_email', 'user_name', 'requests', 'tokens', 'latency', 'errors', 'success_rate']} />
       </div>
     </section>
   );
@@ -905,7 +917,7 @@ function Channels({ api }: { api: ApiClient }) {
   const [channels, setChannels] = useState<any[]>([]);
   const [checkingAll, setCheckingAll] = useState(false);
   const [testingId, setTestingId] = useState('');
-  const [form, setForm] = useState({ name: '', provider: 'openai-compatible', base_url: 'https://api.openai.com/v1', api_key: '', priority: 100, status: 'active' });
+  const [form, setForm] = useState({ name: '', provider: 'openai-compatible', base_url: 'https://api.openai.com/v1', is_full_url: false, api_key: '', priority: 100, status: 'active' });
   async function load() {
     const channelData = await api.get('/api/admin/channels');
     setChannels(channelData.channels);
@@ -914,7 +926,7 @@ function Channels({ api }: { api: ApiClient }) {
   async function save(event: React.FormEvent) {
     event.preventDefault();
     await api.post('/api/admin/channels', form);
-    setForm({ ...form, name: '', api_key: '' });
+    setForm({ ...form, name: '', api_key: '', is_full_url: false });
     await load();
   }
   async function remove(id: string) {
@@ -945,13 +957,18 @@ function Channels({ api }: { api: ApiClient }) {
         <h2>新增渠道</h2>
         <Input label="名称" value={form.name} onChange={(name) => setForm({ ...form, name })} />
         <Input label="Base URL" value={form.base_url} onChange={(base_url) => setForm({ ...form, base_url })} />
+        <label className="checkboxField">
+          <input type="checkbox" checked={form.is_full_url} onChange={(event) => setForm({ ...form, is_full_url: event.target.checked })} />
+          <span>是否为完整 URL</span>
+        </label>
+        <p className="hintText">不勾选时自动补全 `/v1/chat/completions`；勾选后测试与调用均原样使用上方链接。</p>
         <Input label="上游 API Key" type="password" value={form.api_key} onChange={(api_key) => setForm({ ...form, api_key })} />
         <Input label="优先级" type="number" value={String(form.priority)} onChange={(priority) => setForm({ ...form, priority: Number(priority) })} />
         <button className="primaryBtn"><Plus />保存渠道</button>
       </form>
       <div className="panel">
         <div className="toolbar compact"><h2>渠道列表</h2><button className="smallBtn" onClick={check} disabled={checkingAll}><RefreshCw className={checkingAll ? 'spin' : ''} />{checkingAll ? '检测中' : '立即检测'}</button></div>
-        <DataTable rows={channels} columns={['name', 'base_url', 'working_url', 'health_latency_ms', 'priority', 'status', 'health_status', 'last_checked_at']} action={(row) => <div className="rowActions"><button className="smallBtn" onClick={() => testChannel(row.id)} disabled={testingId === row.id}><RefreshCw className={testingId === row.id ? 'spin' : ''} />测试</button><button className="iconBtn danger" onClick={() => remove(row.id)} title="删除"><Trash2 /></button></div>} />
+        <DataTable rows={channels} columns={['name', 'base_url', 'full_url_mode', 'working_url', 'health_latency_ms', 'priority', 'status', 'health_status', 'last_checked_at']} action={(row) => <div className="rowActions"><button className="smallBtn" onClick={() => testChannel(row.id)} disabled={testingId === row.id}><RefreshCw className={testingId === row.id ? 'spin' : ''} />测试</button><button className="iconBtn danger" onClick={() => remove(row.id)} title="删除"><Trash2 /></button></div>} />
       </div>
     </section>
   );
@@ -1160,6 +1177,7 @@ function labelOf(key: string) {
     health_status: '健康',
     last_checked_at: '检测时间',
     working_url: '成功调用 URL',
+    full_url_mode: '完整 URL',
     health_latency_ms: '延迟(ms)',
     requests: '请求',
     errors: '错误',
@@ -1173,6 +1191,9 @@ function labelOf(key: string) {
     hour: '小时',
     tokens: 'Token',
     latency: '平均延迟',
+    api_key_name: 'API Key 名称',
+    user_email: '用户邮箱',
+    user_name: '用户名称',
     success_rate: '成功率'
   };
   return labels[key] || key;

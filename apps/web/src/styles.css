@@ -1025,6 +1025,23 @@ code {
   font: inherit;
 }
 
+.checkboxField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.checkboxField input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .batchBox textarea {
   grid-column: 1 / -1;
   min-height: 92px;
