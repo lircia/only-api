@@ -143,7 +143,7 @@ Turnstile を有効にする場合は、この Worker シークレットと Page
 | 名前 | 種類 | 用途 |
 | --- | --- | --- |
 | `CF_ACCOUNT_ID` | 変数 | Cloudflare アカウント ID |
-| `CF_API_TOKEN` | シークレット | Workers 利用量を読み取れる API Token |
+| `CF_API_TOKEN` | 変数 | Account Analytics Read 権限が必要 |
 | `WORKERS_DAILY_REQUEST_LIMIT` | 変数 | 割合計算用の日次リクエスト上限。既定値は `100000` |
 
 別名として `CLOUDFLARE_ACCOUNT_ID`、`CF_ACCOUNT_TAG`、`CLOUDFLARE_ACCOUNT_TAG`、`CLOUDFLARE_API_TOKEN`、`CF_TOKEN`、`CLOUDFLARE_TOKEN` も使えます。この GraphQL クエリでは Zone ID ではなく Account ID が必要です。
@@ -252,7 +252,7 @@ Pages フロントエンド URL を開くと、初回のみ設定ページが表
 
 Workers 利用量監視には Cloudflare アカウント ID と API Token 変数が必要です。足りない場合、フロントエンドに設定メッセージが表示されます。
 
-Zone ID ではなくアカウント概要の Account ID を使い、Token には `Account > Account Analytics > Read` 権限を付けます。欠けた変数と直近の GraphQL エラーが表示され、失敗した照会はゼロ使用量として保存・通知されません。
+Zone ID ではなく Account ID を使います。`CF_API_TOKEN` には `Account > Account Analytics > Read` 権限が必要です。失敗した照会はゼロ使用量として保存・通知されません。
 
 表示項目：
 

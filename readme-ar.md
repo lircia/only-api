@@ -143,7 +143,7 @@ apps/api/migrations/0001_initial.sql
 | الاسم | النوع | الغرض |
 | --- | --- | --- |
 | `CF_ACCOUNT_ID` | متغير | معرف حساب Cloudflare |
-| `CF_API_TOKEN` | سر | رمز API يستطيع قراءة استخدام Workers |
+| `CF_API_TOKEN` | متغير | يحتاج Account Analytics Read |
 | `WORKERS_DAILY_REQUEST_LIMIT` | متغير | حد الطلبات اليومي لحساب النسبة، الافتراضي `100000` |
 
 الأسماء البديلة المقبولة هي `CLOUDFLARE_ACCOUNT_ID` و`CF_ACCOUNT_TAG` و`CLOUDFLARE_ACCOUNT_TAG` و`CLOUDFLARE_API_TOKEN` و`CF_TOKEN` و`CLOUDFLARE_TOKEN`. يتطلب GraphQL معرف الحساب، ولا يصلح معرف المنطقة بدلا منه.
@@ -252,7 +252,7 @@ Umami للواجهة الأمامية يسجل زيارات لوحة Pages. يم
 
 مراقبة استخدام Workers تحتاج إلى متغير Cloudflare Account ID ومتغير API Token. إذا كانت ناقصة، تعرض الواجهة رسالة إعداد.
 
-استخدم Account ID من نظرة الحساب، وليس Zone ID. يحتاج الرمز إلى صلاحية `Account > Account Analytics > Read`. تعرض الواجهة المتغير الناقص وآخر خطأ GraphQL، ولا تحفظ الاستعلامات الفاشلة كاستخدام صفري ولا ترسلها.
+استخدم Account ID وليس Zone ID. يحتاج `CF_API_TOKEN` إلى صلاحية `Account > Account Analytics > Read`. لا تحفظ الاستعلامات الفاشلة كاستخدام صفري ولا ترسلها.
 
 تعرض الصفحة:
 

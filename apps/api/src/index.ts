@@ -1136,7 +1136,7 @@ async function captureWorkerUsage(env: Env, options: { forceNotify?: boolean } =
           viewer {
             accounts(filter: { accountTag: $accountTag }) {
               workersInvocationsAdaptive(limit: 1000, filter: { datetime_geq: $datetime_geq, datetime_leq: $datetime_leq }) {
-                sum { requests errors cpuTime }
+                sum { requests errors }
               }
             }
           }
@@ -1158,7 +1158,7 @@ async function captureWorkerUsage(env: Env, options: { forceNotify?: boolean } =
     snapshot = rows.reduce((acc: WorkerUsageSnapshot, row: any) => ({
       requests: acc.requests + Number(row.sum?.requests || 0),
       errors: acc.errors + Number(row.sum?.errors || 0),
-      cpu_time_ms: acc.cpu_time_ms + Number(row.sum?.cpuTime || 0),
+      cpu_time_ms: 0,
       period_start: start.toISOString(),
       period_end: end.toISOString()
     }), { requests: 0, errors: 0, cpu_time_ms: 0, period_start: start.toISOString(), period_end: end.toISOString() });
@@ -1254,7 +1254,7 @@ function workerUsageConfigMessage(env: Env): string {
   const config = getWorkerUsageConfigState(env);
   const missing: string[] = [];
   if (!config.accountIdConfigured) missing.push('CF_ACCOUNT_ID（Cloudflare Account ID，不能填写 Zone ID）');
-  if (!config.apiTokenConfigured) missing.push('CF_API_TOKEN（需要 Account Analytics Read 权限）');
+  if (!config.apiTokenConfigured) missing.push('CF_API_TOKEN（纯文本运行时变量，需要 Account Analytics Read 权限，不能使用 Secret Store 绑定）');
   return `Workers 用量尚未配置完整，缺少：${missing.join('、')}。`;
 }
 

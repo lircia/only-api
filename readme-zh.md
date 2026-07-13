@@ -146,7 +146,7 @@ SQL 会创建这些表：
 | 名称 | 类型 | 用途 |
 | --- | --- | --- |
 | `CF_ACCOUNT_ID` | 变量 | Cloudflare 账户 ID |
-| `CF_API_TOKEN` | 密钥 | 可读取 Workers 用量的 API Token |
+| `CF_API_TOKEN` | 变量 | 需要 Account Analytics Read 权限 |
 | `WORKERS_DAILY_REQUEST_LIMIT` | 变量 | 计算百分比用的每日请求额度，默认 `100000` |
 
 也支持这些别名：`CLOUDFLARE_ACCOUNT_ID`、`CF_ACCOUNT_TAG`、`CLOUDFLARE_ACCOUNT_TAG`、`CLOUDFLARE_API_TOKEN`、`CF_TOKEN`、`CLOUDFLARE_TOKEN`。该 GraphQL 查询必须使用 Account ID，Zone ID 不能替代。
@@ -264,7 +264,7 @@ Pages 部署完成后，把 Worker 变量 `APP_ORIGIN` 设置为 Pages 前端地
 
 Workers 用量监测需要 Cloudflare 账号 ID 和 API Token 变量。缺少变量时，前端会显示配置提示。
 
-请填写 Cloudflare 账户总览中的 Account ID，不要填写域名的 Zone ID。API Token 需要 `Account > Account Analytics > Read` 权限。前端现在会明确显示缺少哪个变量以及最近一次 GraphQL 错误；查询失败不会再写入全零快照，也不会再推送误导性的零用量消息。
+请填写 Cloudflare 账户总览中的 Account ID，不要填写域名的 Zone ID。`CF_API_TOKEN` 需要 `Account > Account Analytics > Read` 权限。前端会明确显示缺少哪个变量以及最近一次 GraphQL 错误；查询失败不会写入全零快照，也不会推送误导性的零用量消息。
 
 页面会显示：
 

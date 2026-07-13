@@ -143,7 +143,7 @@ apps/api/migrations/0001_initial.sql
 | Όνομα | Τύπος | Σκοπός |
 | --- | --- | --- |
 | `CF_ACCOUNT_ID` | Μεταβλητή | ID λογαριασμού Cloudflare |
-| `CF_API_TOKEN` | Μυστικό | API Token με δικαίωμα ανάγνωσης χρήσης Workers |
+| `CF_API_TOKEN` | Μεταβλητή | απαιτεί Account Analytics Read |
 | `WORKERS_DAILY_REQUEST_LIMIT` | Μεταβλητή | ημερήσιο όριο αιτημάτων για υπολογισμό ποσοστού, προεπιλογή `100000` |
 
 Γίνονται δεκτά τα alias `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN` και `CLOUDFLARE_TOKEN`. Το GraphQL απαιτεί Account ID· το Zone ID δεν είναι κατάλληλο.
@@ -256,7 +256,7 @@ apps/api/migrations/0001_initial.sql
 
 Η παρακολούθηση χρήσης Workers απαιτεί Cloudflare Account ID και API Token. Αν λείπουν, το frontend εμφανίζει μήνυμα ρύθμισης.
 
-Χρησιμοποίησε το Account ID από την επισκόπηση λογαριασμού, όχι Zone ID. Το token χρειάζεται `Account > Account Analytics > Read`. Εμφανίζονται οι ελλείπουσες μεταβλητές και το τελευταίο σφάλμα GraphQL· αποτυχημένα αιτήματα δεν αποθηκεύονται ούτε αποστέλλονται ως μηδενική χρήση.
+Χρησιμοποίησε Account ID, όχι Zone ID. Το `CF_API_TOKEN` απαιτεί `Account > Account Analytics > Read`. Αποτυχημένα αιτήματα δεν αποθηκεύονται ούτε αποστέλλονται ως μηδενική χρήση.
 
 Η σελίδα εμφανίζει:
 

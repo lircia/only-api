@@ -145,7 +145,7 @@ Optional Workers usage variables:
 | Name | Type | Purpose |
 | --- | --- | --- |
 | `CF_ACCOUNT_ID` | Variable | Cloudflare account ID |
-| `CF_API_TOKEN` | Secret | API token with permission to read Workers usage |
+| `CF_API_TOKEN` | Variable | API token with Account Analytics Read permission |
 | `WORKERS_DAILY_REQUEST_LIMIT` | Variable | Daily request limit used for percent calculation, default `100000` |
 
 Accepted aliases are `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN`, and `CLOUDFLARE_TOKEN`. A Zone ID cannot replace the Account ID for this GraphQL query.
@@ -263,7 +263,7 @@ Backend tracking does not send user email, API keys, or request bodies. It only 
 
 Workers usage monitoring requires the Cloudflare account ID and API token variables. If they are missing, the frontend shows a configuration message.
 
-Use the Account ID from the Cloudflare account overview, not a Zone ID. The token needs `Account > Account Analytics > Read`. The page now names missing variables and shows the last GraphQL error. Failed queries are not stored as zero-usage snapshots and do not send misleading usage notifications.
+Use the Account ID from the Cloudflare account overview, not a Zone ID. `CF_API_TOKEN` needs `Account > Account Analytics > Read`. The page names missing variables and shows the last GraphQL error. Failed queries are not stored as zero-usage snapshots and do not send misleading usage notifications.
 
 The page displays:
 
