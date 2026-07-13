@@ -8,7 +8,7 @@ Only API は、Cloudflare Workers + Pages にデプロイできる OpenAI 互換
 
 速度を上げるために Cloudflare ドメイン優先ルートまたは優先 IP サービスを使うこともできます。フロントエンドは上流 API を直接呼び出さないため、通常フロントエンドのドメインは優先化不要です。優先化に関するリンクは Web 検索で探せます。
 
-このリポジトリは GitHub ホスティングと Cloudflare ダッシュボードでのデプロイを想定しています。`wrangler.toml` は使いません。
+このリポジトリは GitHub と Cloudflare ダッシュボードでのデプロイ向けです。`wrangler.toml` が Worker の入口、名前、通常変数、Cron Trigger を固定し、D1 は手動でバインドします。
 
 ## 言語
 
@@ -25,6 +25,7 @@ Only API は、Cloudflare Workers + Pages にデプロイできる OpenAI 互換
 | --- | --- |
 | Pages フロントエンド | `apps/web` |
 | Worker バックエンド | `apps/api/src/index.ts` |
+| Worker デプロイ設定 | `wrangler.toml` |
 | D1 スキーマ SQL | `apps/api/migrations/0001_initial.sql` |
 | 依存関係ファイル | `package.json` |
 
@@ -57,13 +58,13 @@ Worker のビルド設定：
 | --- | --- |
 | ルートディレクトリ | 空欄または `/` |
 | ビルドコマンド | `npm ci` |
-| デプロイコマンド | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
+| デプロイコマンド | `npx wrangler deploy` |
 
-`--keep-vars` が維持するのはダッシュボードの通常環境変数です。シークレットは Cloudflare が別に維持しますが、このオプションは D1 バインディングを宣言または保証しません。このリポジトリは Wrangler 設定ファイルを使わないため、常に同じ Worker 名へデプロイし、更新のたびに `DB` バインディングを確認してください。消えていた場合は新しいデータベースを作らず、既存の D1 を再バインドします。
+Wrangler は Cloudflare の公式デプロイツールで、Git ビルドが `wrangler.toml` を自動的に読みます。コードをデプロイし、`keep_vars = true` で通常変数を維持し、毎時 Cron Trigger を設定します。D1 はファイルに宣言しないため、更新後に消えていれば既存 D1 を `DB` として手動で再バインドします。
 
-## デプロイ 2：D1 データベースを作成
+## デプロイ 2：D1 データベースを作成または再利用
 
-Cloudflare ダッシュボードで D1 データベースを作成します。
+初回のみ D1 を作成し、更新時は既存データベースを再利用します。
 
 推奨データベース名：
 
@@ -99,11 +100,11 @@ apps/api/migrations/0001_initial.sql
 
 ## デプロイ 3：Worker リソースと変数を設定
 
-Worker 設定で D1 をバインドします：
+Worker 更新後にバインディングを確認し、必要なら手動で D1 を設定します：
 
 | 種類 | 名前 | 値 |
 | --- | --- | --- |
-| D1 database | `DB` | 作成した D1 データベース |
+| D1 database | `DB` | 既存の `only_api` データベース |
 
 初回設定に必須の Worker 変数：
 
@@ -118,7 +119,7 @@ Worker 設定で D1 をバインドします：
 | 名前 | 種類 | 用途 |
 | --- | --- | --- |
 | `APP_ORIGIN` | 変数 | CORS を制限する Pages URL。未設定時は `*` |
-| `API_PUBLIC_BASE_URL` | 変数 | フロントエンドに表示する公開 Worker URL |
+| `API_PUBLIC_BASE_URL` | 変数 | API Key ページに表示する Worker の公開ルート URL。例 `https://your-worker.workers.dev`。`/v1` は付けません |
 
 任意のメール変数：
 
@@ -145,7 +146,7 @@ Turnstile を有効にする場合は、この Worker シークレットと Page
 | `CF_API_TOKEN` | シークレット | Workers 利用量を読み取れる API Token |
 | `WORKERS_DAILY_REQUEST_LIMIT` | 変数 | 割合計算用の日次リクエスト上限。既定値は `100000` |
 
-別名として `CLOUDFLARE_ACCOUNT_ID`、`CF_ACCOUNT_TAG`、`CLOUDFLARE_ACCOUNT_TAG`、`CF_ZONE_ID`、`CLOUDFLARE_ZONE_ID`、`CLOUDFLARE_API_TOKEN`、`CF_TOKEN`、`CLOUDFLARE_TOKEN` も使えます。
+別名として `CLOUDFLARE_ACCOUNT_ID`、`CF_ACCOUNT_TAG`、`CLOUDFLARE_ACCOUNT_TAG`、`CLOUDFLARE_API_TOKEN`、`CF_TOKEN`、`CLOUDFLARE_TOKEN` も使えます。この GraphQL クエリでは Zone ID ではなく Account ID が必要です。
 
 任意のバックエンド Umami 変数：
 
@@ -173,9 +174,11 @@ WxPusher 通知変数：
 | `WXPUSHER_UIDS` | 変数 | カンマ区切り UID。Topic を使わない場合は必須 |
 | `WXPUSHER_TOPIC_IDS` | 変数 | カンマ区切り Topic ID。UID を使わない場合は必須 |
 
+任意機能の必須条件：メール認証は Resend の 2 変数、Turnstile は Worker Secret Key と Pages Site Key、Workers 利用量は `CF_ACCOUNT_ID` と `CF_API_TOKEN` が必須です。日次上限は任意で既定 `100000`。Backend Umami は有効時に Website ID、Telegram は Bot Token と Chat ID、WxPusher は AppToken と UID または Topic ID が必要で、それ以外は任意です。
+
 自動確認と自動通知に必要なスケジュールトリガー：
 
-チャネルの自動確認、Workers 利用量の自動取得、自動通知を使う場合は、Cloudflare ダッシュボードで Worker Cron Trigger を追加する必要があります。推奨式は `0 * * * *`（毎時）です。トリガーは Worker を起動し、アプリが設定間隔を確認します。チャネル確認は既定 60 分、Workers 利用量取得は既定 360 分です。自動通知には「Workers 利用量を通知」を有効にし、Telegram または WxPusher の設定も必要です。
+`wrangler.toml` の `0 * * * *` が Worker を毎時起動します。チャネル確認は既定 60 分で、各候補 URL は最大 60 秒待ってから次へ進みます。Workers 利用量は 360 分（6 時間）ごとに取得し、通知有効時は同じ間隔で送信します。
 
 ## デプロイ 4：Pages フロントエンドをデプロイ
 
@@ -190,23 +193,26 @@ Pages のビルド設定：
 | ビルドコマンド | `npm ci && npm run build:web` |
 | ビルド出力ディレクトリ | `apps/web/dist` |
 
-Cloudflare で Node.js ビルドバージョンの指定が必要な場合は、Pages ビルド変数 `NODE_VERSION=20` を追加します。
-
 必須 Pages 変数：
 
-```txt
-VITE_API_BASE_URL=https://your-worker-domain.workers.dev
-```
+| 名前 | 種類 | 用途 |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | 変数 | フロントエンドが実際に接続する Worker のルート URL。例 `https://your-worker.workers.dev`。`/v1` は付けません |
 
 任意の Pages 変数：
 
-```txt
-VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
-VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
-VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
-VITE_UMAMI_WEBSITE_ID=your-frontend-umami-website-id
-VITE_UMAMI_HOST_URL=https://cloud.umami.is
-```
+| 名前 | 種類 | 用途 |
+| --- | --- | --- |
+| `NODE_VERSION` | ビルド変数 | Cloudflare が Node.js バージョンを求める場合は `20` |
+| `VITE_TURNSTILE_SITE_KEY` | 変数 | 公開 Turnstile Site Key。Turnstile 有効時に必須 |
+| `VITE_BACKGROUND_IMAGE_URL` | 変数 | 既定の背景画像 URL |
+| `VITE_UMAMI_SCRIPT_URL` | 変数 | Umami スクリプト URL。例 `https://cloud.umami.is/script.js` |
+| `VITE_UMAMI_WEBSITE_ID` | 変数 | フロントエンド Umami Website ID。設定するとフォールバック統計も有効化 |
+| `VITE_UMAMI_HOST_URL` | 変数 | 任意の Umami ホスト URL。主にセルフホスト用 |
+
+`VITE_` で始まる変数はブラウザ JavaScript に組み込まれ、公開されます。シークレット、上流 API Key、Worker Token、Turnstile Secret Key を入れないでください。
+
+`API_PUBLIC_BASE_URL` と `VITE_API_BASE_URL` は通常同じ Worker URL ですが、前者は表示専用の任意 Worker 変数、後者は実際の接続先を決める必須 Pages ビルド変数です。
 
 Pages のデプロイ後、Worker 変数 `APP_ORIGIN` を Pages URL に設定します。
 
@@ -246,6 +252,8 @@ Pages フロントエンド URL を開くと、初回のみ設定ページが表
 
 Workers 利用量監視には Cloudflare アカウント ID と API Token 変数が必要です。足りない場合、フロントエンドに設定メッセージが表示されます。
 
+Zone ID ではなくアカウント概要の Account ID を使い、Token には `Account > Account Analytics > Read` 権限を付けます。欠けた変数と直近の GraphQL エラーが表示され、失敗した照会はゼロ使用量として保存・通知されません。
+
 表示項目：
 
 - 現在の使用済み割合
@@ -269,15 +277,6 @@ https://your-worker-domain.workers.dev/v1
 
 ```http
 Authorization: Bearer oi-only-...
-```
-
-SillyTavern 推奨設定：
-
-```txt
-API type: OpenAI Compatible / Custom OpenAI-compatible
-API Base URL: https://your-worker-domain.workers.dev/v1
-API Key: 完全な oi-only-... キー
-Model: モデル広場からコピーしたモデル名
 ```
 
 ## チャネル Base URL
@@ -305,13 +304,6 @@ Model: モデル広場からコピーしたモデル名
 3. Pages 変数を変更した後は Pages を再デプロイします。
 4. Worker バインド `DB` を確認します。
 5. Worker の `DB` バインディングと `APP_ORIGIN` を確認します。初回設定時は `ADMIN_SETUP_SECRET` も確認します。
-
-SillyTavern が Unauthorized を表示する場合：
-
-1. 表示されるプレフィックスではなく完全なキーを使います。
-2. OpenAI Compatible または Custom OpenAI-compatible モードを使います。
-3. キーの前後に空白がないか確認します。
-4. 選択したモデル名がモデル広場に存在するか確認します。
 
 ## 上級者向け任意変数
 

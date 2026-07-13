@@ -8,7 +8,7 @@
 
 Μπορείς να χρησιμοποιήσεις υπηρεσία βελτιστοποίησης τομέα Cloudflare ή preferred-IP για καλύτερη ταχύτητα. Το frontend δεν καλεί απευθείας τους upstream παρόχους, επομένως ο τομέας του frontend συνήθως δεν χρειάζεται βελτιστοποίηση. Μπορείς να βρεις σχετικούς συνδέσμους μέσω αναζήτησης στο διαδίκτυο.
 
-Το αποθετήριο έχει σχεδιαστεί για φιλοξενία στο GitHub και ανάπτυξη από τον πίνακα Cloudflare. Δεν χρησιμοποιεί `wrangler.toml`.
+Το αποθετήριο προορίζεται για GitHub και τον πίνακα Cloudflare. Το `wrangler.toml` κρατά σταθερά entry point, όνομα Worker, απλές μεταβλητές και Cron Trigger· η D1 συνδέεται χειροκίνητα.
 
 ## Γλώσσες
 
@@ -25,6 +25,7 @@
 | --- | --- |
 | Pages frontend | `apps/web` |
 | Worker backend | `apps/api/src/index.ts` |
+| Ρύθμιση ανάπτυξης Worker | `wrangler.toml` |
 | D1 schema SQL | `apps/api/migrations/0001_initial.sql` |
 | Αρχείο εξαρτήσεων | `package.json` |
 
@@ -57,13 +58,13 @@
 | --- | --- |
 | Root directory | κενό ή `/` |
 | Build command | `npm ci` |
-| Deploy command | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
+| Deploy command | `npx wrangler deploy` |
 
-Το `--keep-vars` διατηρεί μόνο τις απλές μεταβλητές περιβάλλοντος του πίνακα. Τα μυστικά διατηρούνται χωριστά από το Cloudflare, αλλά η σύνδεση D1 ούτε δηλώνεται ούτε εγγυάται. Επειδή το αποθετήριο δεν χρησιμοποιεί αρχείο ρυθμίσεων Wrangler, ανάπτυσσε πάντα στον ίδιο Worker και έλεγχε τη σύνδεση `DB` μετά από κάθε ενημέρωση. Αν λείπει, σύνδεσε ξανά την υπάρχουσα D1 χωρίς να δημιουργήσεις νέα βάση.
+Το Wrangler είναι το επίσημο εργαλείο Cloudflare. Το Git build διαβάζει `wrangler.toml`, αναπτύσσει τον κώδικα, διατηρεί απλές μεταβλητές με `keep_vars = true` και ορίζει ωριαίο Cron Trigger. Η D1 δεν δηλώνεται· αν χαθεί η σύνδεση μετά από ενημέρωση, σύνδεσε χειροκίνητα την υπάρχουσα D1 ως `DB`.
 
-## Ανάπτυξη 2: Δημιουργία D1 βάσης
+## Ανάπτυξη 2: Δημιουργία ή επαναχρησιμοποίηση D1
 
-Δημιούργησε βάση D1 στον πίνακα Cloudflare.
+Δημιούργησε D1 μόνο την πρώτη φορά και χρησιμοποίησε την ίδια βάση στις ενημερώσεις.
 
 Προτεινόμενο όνομα βάσης:
 
@@ -99,11 +100,11 @@ apps/api/migrations/0001_initial.sql
 
 ## Ανάπτυξη 3: Σύνδεση πόρων και μεταβλητών Worker
 
-Στις ρυθμίσεις Worker σύνδεσε τη D1:
+Μετά από κάθε ανάπτυξη έλεγξε και, αν χρειάζεται, σύνδεσε χειροκίνητα τη D1:
 
 | Τύπος | Όνομα | Τιμή |
 | --- | --- | --- |
-| D1 database | `DB` | η D1 βάση σου |
+| D1 database | `DB` | υπάρχουσα βάση `only_api` |
 
 Απαραίτητη μεταβλητή Worker για την πρώτη ρύθμιση:
 
@@ -145,7 +146,7 @@ apps/api/migrations/0001_initial.sql
 | `CF_API_TOKEN` | Μυστικό | API Token με δικαίωμα ανάγνωσης χρήσης Workers |
 | `WORKERS_DAILY_REQUEST_LIMIT` | Μεταβλητή | ημερήσιο όριο αιτημάτων για υπολογισμό ποσοστού, προεπιλογή `100000` |
 
-Γίνονται δεκτά και τα alias `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CF_ZONE_ID`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN` και `CLOUDFLARE_TOKEN`.
+Γίνονται δεκτά τα alias `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN` και `CLOUDFLARE_TOKEN`. Το GraphQL απαιτεί Account ID· το Zone ID δεν είναι κατάλληλο.
 
 Προαιρετικές μεταβλητές backend Umami:
 
@@ -173,9 +174,11 @@ apps/api/migrations/0001_initial.sql
 | `WXPUSHER_UIDS` | Μεταβλητή | λίστα UID με κόμματα, απαραίτητη χωρίς ID θεμάτων |
 | `WXPUSHER_TOPIC_IDS` | Μεταβλητή | λίστα ID θεμάτων με κόμματα, απαραίτητη χωρίς UID |
 
+Κανόνες απαίτησης: το email χρειάζεται και τις δύο μεταβλητές Resend· το Turnstile χρειάζεται Worker Secret Key και Pages Site Key· η χρήση Workers χρειάζεται `CF_ACCOUNT_ID` και `CF_API_TOKEN`, ενώ το ημερήσιο όριο είναι προαιρετικό με προεπιλογή `100000`. Το backend Umami χρειάζεται Website ID όταν ενεργοποιείται. Το Telegram χρειάζεται Bot Token και Chat ID. Το WxPusher χρειάζεται AppToken και UID ή Topic ID, ενώ τα υπόλοιπα είναι προαιρετικά.
+
 Χρονοπρογραμματισμός για αυτόματους ελέγχους και ειδοποιήσεις:
 
-Για αυτόματο έλεγχο καναλιών, συλλογή χρήσης Workers ή αυτόματες ειδοποιήσεις απαιτείται Worker Cron Trigger. Προτείνεται `0 * * * *` (κάθε ώρα). Ο έλεγχος καναλιών έχει προεπιλογή 60 λεπτά και η συλλογή χρήσης 360 λεπτά. Οι αυτόματες ειδοποιήσεις απαιτούν επίσης ενεργό διακόπτη και ρυθμισμένο Telegram ή WxPusher.
+Το `wrangler.toml` ξεκινά τον Worker κάθε ώρα με `0 * * * *`. Τα κανάλια ελέγχονται κάθε 60 λεπτά και κάθε υποψήφιο URL περιμένει έως 60 δευτερόλεπτα. Η χρήση συλλέγεται κάθε 360 λεπτά (6 ώρες) και αποστέλλεται στο ίδιο διάστημα όταν οι ειδοποιήσεις είναι ενεργές.
 
 ## Ανάπτυξη 4: Ανάπτυξη Pages frontend
 
@@ -194,19 +197,26 @@ apps/api/migrations/0001_initial.sql
 
 Απαραίτητη μεταβλητή Pages:
 
-```txt
-VITE_API_BASE_URL=https://your-worker-domain.workers.dev
-```
+| Όνομα | Τύπος | Σκοπός |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | Μεταβλητή | πραγματικό βασικό URL Worker που καλεί το frontend, π.χ. `https://your-worker.workers.dev`, χωρίς `/v1` |
 
 Προαιρετικές μεταβλητές Pages:
 
-```txt
-VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
-VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
-VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
-VITE_UMAMI_WEBSITE_ID=your-frontend-umami-website-id
-VITE_UMAMI_HOST_URL=https://cloud.umami.is
-```
+| Όνομα | Τύπος | Σκοπός |
+| --- | --- | --- |
+| `NODE_VERSION` | Μεταβλητή build | `20` όταν το Cloudflare ζητά έκδοση Node.js |
+| `VITE_TURNSTILE_SITE_KEY` | Μεταβλητή | δημόσιο Site Key, απαραίτητο όταν ενεργοποιείται το Turnstile |
+| `VITE_BACKGROUND_IMAGE_URL` | Μεταβλητή | προαιρετικό URL εικόνας φόντου |
+| `VITE_UMAMI_SCRIPT_URL` | Μεταβλητή | URL script Umami, π.χ. `https://cloud.umami.is/script.js` |
+| `VITE_UMAMI_WEBSITE_ID` | Μεταβλητή | Website ID του frontend Umami |
+| `VITE_UMAMI_HOST_URL` | Μεταβλητή | προαιρετικό host URL Umami |
+
+Τα `NODE_VERSION` και εικόνα φόντου είναι πάντα προαιρετικά. Το Site Key απαιτείται μόνο με ενεργό Turnstile. Όταν το Umami ρυθμίζεται από τις ρυθμίσεις συστήματος, οι μεταβλητές Pages είναι προαιρετικές· αν χρησιμοποιούνται μόνο Pages, απαιτούνται Website ID και Script URL και το Host URL είναι προαιρετικό.
+
+Οι μεταβλητές `VITE_` ενσωματώνονται στο JavaScript του browser και είναι δημόσιες. Μην αποθηκεύεις εκεί μυστικά, upstream API Key, Worker Token ή Turnstile Secret Key.
+
+Τα `API_PUBLIC_BASE_URL` και `VITE_API_BASE_URL` συνήθως περιέχουν το ίδιο Worker URL: το πρώτο είναι προαιρετική μεταβλητή Worker μόνο για εμφάνιση, ενώ το δεύτερο είναι απαραίτητη μεταβλητή Pages που καθορίζει τα πραγματικά αιτήματα frontend.
 
 Μετά την ανάπτυξη Pages, όρισε τη μεταβλητή Worker `APP_ORIGIN` στο Pages URL.
 
@@ -246,6 +256,8 @@ VITE_UMAMI_HOST_URL=https://cloud.umami.is
 
 Η παρακολούθηση χρήσης Workers απαιτεί Cloudflare Account ID και API Token. Αν λείπουν, το frontend εμφανίζει μήνυμα ρύθμισης.
 
+Χρησιμοποίησε το Account ID από την επισκόπηση λογαριασμού, όχι Zone ID. Το token χρειάζεται `Account > Account Analytics > Read`. Εμφανίζονται οι ελλείπουσες μεταβλητές και το τελευταίο σφάλμα GraphQL· αποτυχημένα αιτήματα δεν αποθηκεύονται ούτε αποστέλλονται ως μηδενική χρήση.
+
 Η σελίδα εμφανίζει:
 
 - τρέχον ποσοστό χρήσης
@@ -269,15 +281,6 @@ Header:
 
 ```http
 Authorization: Bearer oi-only-...
-```
-
-Προτεινόμενες ρυθμίσεις SillyTavern:
-
-```txt
-API type: OpenAI Compatible / Custom OpenAI-compatible
-API Base URL: https://your-worker-domain.workers.dev/v1
-API Key: πλήρες oi-only-... key
-Model: όνομα μοντέλου αντιγραμμένο από την πλατεία μοντέλων
 ```
 
 ## Βασικό URL καναλιού
@@ -305,13 +308,6 @@ Model: όνομα μοντέλου αντιγραμμένο από την πλα
 3. Κάνε ξανά deploy το Pages μετά από αλλαγή μεταβλητών Pages.
 4. Έλεγξε το Worker binding `DB`.
 5. Έλεγξε τη σύνδεση Worker `DB` και το `APP_ORIGIN`· στην πρώτη ρύθμιση και το `ADMIN_SETUP_SECRET`.
-
-Αν το SillyTavern εμφανίζει Unauthorized:
-
-1. Χρησιμοποίησε το πλήρες key, όχι μόνο το ορατό πρόθεμα.
-2. Χρησιμοποίησε OpenAI Compatible ή Custom OpenAI-compatible.
-3. Βεβαιώσου ότι δεν υπάρχουν κενά πριν ή μετά το key.
-4. Βεβαιώσου ότι το επιλεγμένο όνομα μοντέλου υπάρχει στην πλατεία μοντέλων.
 
 ## Προχωρημένες προαιρετικές μεταβλητές
 

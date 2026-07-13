@@ -8,7 +8,7 @@ We do not provide any API key or upstream API endpoint. This platform is only fo
 
 You may use a Cloudflare domain preferred-route or preferred-IP service to improve speed. The frontend does not call upstream providers directly, so the frontend domain usually does not need optimization. You can find optimization links through web search.
 
-This repository is designed for GitHub hosting and Cloudflare dashboard deployment. It does not use `wrangler.toml`.
+This repository is designed for GitHub hosting and Cloudflare dashboard deployment. The included `wrangler.toml` keeps the Worker entry point, name, ordinary variables, and Cron Trigger consistent; D1 is bound manually.
 
 ## Languages
 
@@ -25,6 +25,7 @@ This repository is designed for GitHub hosting and Cloudflare dashboard deployme
 | --- | --- |
 | Pages frontend | `apps/web` |
 | Worker backend | `apps/api/src/index.ts` |
+| Worker deployment config | `wrangler.toml` |
 | D1 schema SQL | `apps/api/migrations/0001_initial.sql` |
 | Root dependency file | `package.json` |
 
@@ -57,13 +58,15 @@ Use these Worker build settings:
 | --- | --- |
 | Root directory | blank or `/` |
 | Build command | `npm ci` |
-| Deploy command | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
+| Deploy command | `npx wrangler deploy` |
 
-`--keep-vars` preserves dashboard environment variables. Secrets are preserved separately, but this flag does not declare or guarantee the D1 binding. Because this repository intentionally has no Wrangler configuration file, deploy the same Worker name and verify the `DB` binding after every Worker update. If the binding is missing, bind the existing D1 database again; do not create a new database.
+Wrangler is Cloudflare's official deployment tool. Cloudflare's Git build runs it automatically and reads `wrangler.toml`; you do not need to operate it locally. It deploys the code, preserves dashboard variables with `keep_vars = true`, and installs the hourly Cron Trigger. D1 is intentionally not declared in the file: after every Worker deployment, manually bind your existing D1 database as `DB` again if Cloudflare removed the binding.
 
-## Deployment 2: Create D1 Database
+The configuration uses `keep_vars = true`, so dashboard variables remain in place. Keep secrets in the Cloudflare dashboard and never write them into `wrangler.toml`.
 
-Create a D1 database in the Cloudflare dashboard.
+## Deployment 2: Create Or Reuse D1 Database
+
+Create a D1 database on the first deployment, or keep using the existing database on later updates.
 
 Recommended database name:
 
@@ -99,11 +102,11 @@ Tables created by the SQL:
 
 ## Deployment 3: Bind Worker Resources And Variables
 
-Bind the D1 database in Worker settings:
+After every Worker deployment, check the Worker bindings page and manually bind D1 if needed:
 
 | Type | Name | Value |
 | --- | --- | --- |
-| D1 database | `DB` | your D1 database |
+| D1 database | `DB` | your existing `only_api` database |
 
 Required Worker variable for first setup:
 
@@ -118,7 +121,7 @@ Recommended Worker variables:
 | Name | Type | Purpose |
 | --- | --- | --- |
 | `APP_ORIGIN` | Variable | Your Pages frontend URL; restricts CORS to this origin. Without it, CORS falls back to `*` |
-| `API_PUBLIC_BASE_URL` | Variable | Public Worker URL shown in the frontend |
+| `API_PUBLIC_BASE_URL` | Variable | Public Worker root URL shown on the API Key page, for example `https://your-worker.workers.dev`; do not append `/v1` |
 
 Optional email variables:
 
@@ -145,7 +148,7 @@ Optional Workers usage variables:
 | `CF_API_TOKEN` | Secret | API token with permission to read Workers usage |
 | `WORKERS_DAILY_REQUEST_LIMIT` | Variable | Daily request limit used for percent calculation, default `100000` |
 
-Accepted aliases are `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CF_ZONE_ID`, `CLOUDFLARE_ZONE_ID`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN`, and `CLOUDFLARE_TOKEN`.
+Accepted aliases are `CLOUDFLARE_ACCOUNT_ID`, `CF_ACCOUNT_TAG`, `CLOUDFLARE_ACCOUNT_TAG`, `CLOUDFLARE_API_TOKEN`, `CF_TOKEN`, and `CLOUDFLARE_TOKEN`. A Zone ID cannot replace the Account ID for this GraphQL query.
 
 Optional backend Umami variables:
 
@@ -173,9 +176,18 @@ WxPusher notification variables:
 | `WXPUSHER_UIDS` | Variable | Comma-separated UID list, required unless topic IDs are used |
 | `WXPUSHER_TOPIC_IDS` | Variable | Comma-separated topic ID list, required unless UIDs are used |
 
+Optional-feature requirement summary:
+
+- Email verification: `RESEND_API_KEY` and `RESEND_FROM` are both required.
+- Turnstile: Worker `TURNSTILE_SECRET_KEY` and Pages `VITE_TURNSTILE_SITE_KEY` are both required.
+- Workers usage: `CF_ACCOUNT_ID` and `CF_API_TOKEN` are required; `WORKERS_DAILY_REQUEST_LIMIT` is optional and defaults to `100000`.
+- Backend Umami: Website ID is required when enabled; Host URL and Hostname are optional. Environment variables are optional overrides for System Settings.
+- Telegram: Bot Token and Chat ID are both required; all other Telegram variables are optional.
+- WxPusher: AppToken and at least one UID or Topic ID are required; its other variables are optional.
+
 Scheduled trigger for automatic checks and notifications:
 
-Add a Worker Cron Trigger in the Cloudflare dashboard if you need automatic channel checks, Workers usage collection, or automatic usage notifications. The recommended cron expression is `0 * * * *` (once per hour). Each trigger wakes the Worker; the app then checks whether the configured interval has elapsed. Channel checks default to 60 minutes and Workers usage collection defaults to 360 minutes. Automatic notifications additionally require “Notify Workers usage” to be enabled and Telegram or WxPusher variables to be configured.
+The included `wrangler.toml` installs `0 * * * *`, which wakes the Worker once per hour. Channel checks default to every 60 minutes; each candidate completion URL may wait up to 60 seconds before moving to the next candidate. Workers usage is collected and, when notifications are enabled, pushed every 360 minutes (6 hours).
 
 ## Deployment 4: Deploy Pages Frontend
 
@@ -190,23 +202,28 @@ Use these Pages build settings:
 | Build command | `npm ci && npm run build:web` |
 | Build output directory | `apps/web/dist` |
 
-If Cloudflare asks for a Node.js build version, add the Pages build variable `NODE_VERSION=20`.
-
 Required Pages variable:
 
-```txt
-VITE_API_BASE_URL=https://your-worker-domain.workers.dev
-```
+| Name | Type | Purpose |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | Variable | Worker backend root URL actually used by the frontend, for example `https://your-worker.workers.dev`; do not append `/v1` |
 
 Optional Pages variables:
 
-```txt
-VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
-VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
-VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
-VITE_UMAMI_WEBSITE_ID=your-frontend-umami-website-id
-VITE_UMAMI_HOST_URL=https://cloud.umami.is
-```
+| Name | Type | Purpose |
+| --- | --- | --- |
+| `NODE_VERSION` | Build variable | Set to `20` if Cloudflare asks for a Node.js build version |
+| `VITE_TURNSTILE_SITE_KEY` | Variable | Public Turnstile Site Key; required when Turnstile is enabled |
+| `VITE_BACKGROUND_IMAGE_URL` | Variable | Default frontend background image URL |
+| `VITE_UMAMI_SCRIPT_URL` | Variable | Umami tracker script URL, for example `https://cloud.umami.is/script.js` |
+| `VITE_UMAMI_WEBSITE_ID` | Variable | Frontend Umami Website ID; setting it also enables the fallback tracker |
+| `VITE_UMAMI_HOST_URL` | Variable | Optional Umami host URL, mainly for self-hosted Umami |
+
+`NODE_VERSION` and the background image URL are always optional. The Turnstile Site Key is conditionally required only when Turnstile is enabled. The three Umami variables are optional when frontend Umami is configured in System Settings; when using only Pages variables, Website ID and Script URL are required and Host URL is optional.
+
+All variables whose names begin with `VITE_` are compiled into browser JavaScript and are publicly visible. Never place a secret key, upstream API key, Worker token, or Turnstile Secret Key in a `VITE_` variable.
+
+`API_PUBLIC_BASE_URL` and `VITE_API_BASE_URL` normally contain the same Worker URL, but they have different jobs: the former is an optional Worker variable used only for displaying the client API address, while the latter is a required Pages build variable that controls actual frontend requests.
 
 After Pages is deployed, set Worker variable `APP_ORIGIN` to the Pages URL.
 
@@ -246,6 +263,8 @@ Backend tracking does not send user email, API keys, or request bodies. It only 
 
 Workers usage monitoring requires the Cloudflare account ID and API token variables. If they are missing, the frontend shows a configuration message.
 
+Use the Account ID from the Cloudflare account overview, not a Zone ID. The token needs `Account > Account Analytics > Read`. The page now names missing variables and shows the last GraphQL error. Failed queries are not stored as zero-usage snapshots and do not send misleading usage notifications.
+
 The page displays:
 
 - current used percent
@@ -269,15 +288,6 @@ Header:
 
 ```http
 Authorization: Bearer oi-only-...
-```
-
-SillyTavern recommended settings:
-
-```txt
-API type: OpenAI Compatible / Custom OpenAI-compatible
-API Base URL: https://your-worker-domain.workers.dev/v1
-API Key: your full oi-only-... key
-Model: copy a model name from Model Square
 ```
 
 ## Channel Base URL
@@ -305,13 +315,6 @@ If the frontend cannot connect:
 3. Redeploy Pages after changing Pages variables.
 4. Check Worker binding `DB`.
 5. Check the Worker `DB` binding and `APP_ORIGIN`. During first setup, also check `ADMIN_SETUP_SECRET`.
-
-If SillyTavern says Unauthorized:
-
-1. Use the full key, not the visible key prefix.
-2. Use OpenAI Compatible or Custom OpenAI-compatible mode.
-3. Make sure there are no spaces before or after the key.
-4. Confirm the selected model name exists in Model Square.
 
 ## Advanced Optional Variables
 

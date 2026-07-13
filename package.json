@@ -4,10 +4,10 @@
   "private": true,
   "description": "Cloudflare Workers + Pages API gateway with users, API keys, channel management, usage stats, and notifications.",
   "scripts": {
-    "dev:api": "wrangler dev apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01",
+    "dev:api": "wrangler dev",
     "dev:web": "vite --host 127.0.0.1 apps/web",
     "build:web": "vite build apps/web",
-    "deploy:api": "wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars",
+    "deploy:api": "wrangler deploy",
     "deploy:web": "npm run build:web && wrangler pages deploy apps/web/dist --project-name only-api-console",
     "db:migrate:local": "wrangler d1 migrations apply only_api --local --migrations-dir=apps/api/migrations",
     "db:migrate:remote": "wrangler d1 migrations apply only_api --remote --migrations-dir=apps/api/migrations",

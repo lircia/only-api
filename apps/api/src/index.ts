@@ -9,8 +9,6 @@ export interface Env {
   API_PUBLIC_BASE_URL?: string;
   CF_ACCOUNT_ID?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
-  CF_ZONE_ID?: string;
-  CLOUDFLARE_ZONE_ID?: string;
   CF_ACCOUNT_TAG?: string;
   CLOUDFLARE_ACCOUNT_TAG?: string;
   CF_API_TOKEN?: string;
@@ -192,7 +190,7 @@ async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Pro
     return json(await checkSingleChannelHealth(env, channelId));
   }
   if (method === 'POST' && path === '/api/admin/worker-usage-check') {
-    if (!hasWorkerUsageConfig(env)) return json({ error: workerUsageConfigMessage() }, 400);
+    if (!hasWorkerUsageConfig(env)) return json({ error: workerUsageConfigMessage(env) }, 400);
     const snapshot = await captureWorkerUsage(env, { forceNotify: true });
     return json({ ok: true, message: '采集成功，已同步推送（如果已配置 Telegram 或 WxPusher 变量）', snapshot });
   }
@@ -751,11 +749,17 @@ async function updateChannelModels(request: Request, env: Env, channelId: string
 }
 
 async function listWorkerUsage(env: Env): Promise<Response> {
-  const rows = await env.DB.prepare('SELECT * FROM worker_usage_snapshots ORDER BY created_at DESC LIMIT 48').all<any>();
+  const [rows, settings] = await Promise.all([
+    env.DB.prepare('SELECT * FROM worker_usage_snapshots ORDER BY created_at DESC LIMIT 48').all<any>(),
+    getSettings(env)
+  ]);
   const limit = getWorkerDailyRequestLimit(env);
+  const config = getWorkerUsageConfigState(env);
   return json({
-    configured: hasWorkerUsageConfig(env),
-    message: hasWorkerUsageConfig(env) ? '' : workerUsageConfigMessage(),
+    configured: config.configured,
+    configuration: config,
+    message: config.configured ? '' : workerUsageConfigMessage(env),
+    lastError: String(settings.lastWorkerUsageError || ''),
     quotaLimit: limit,
     snapshots: (rows.results || []).map((row: any) => toWorkerUsageView(row, limit))
   });
@@ -1061,57 +1065,64 @@ type WorkerUsageView = WorkerUsageSnapshot & {
 };
 
 async function captureWorkerUsage(env: Env, options: { forceNotify?: boolean } = {}): Promise<WorkerUsageView | null> {
-  if (!hasWorkerUsageConfig(env)) return null;
-  let snapshot = { requests: 0, errors: 0, cpu_time_ms: 0, period_start: '', period_end: '' };
+  if (!hasWorkerUsageConfig(env)) throw new HttpError(workerUsageConfigMessage(env), 400);
   const accountId = getCloudflareAccountId(env);
   const apiToken = getCloudflareApiToken(env);
   const quotaLimit = getWorkerDailyRequestLimit(env);
-  if (accountId && apiToken) {
-    try {
-      const end = new Date();
-      const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-      const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${apiToken}`,
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-          query: `query WorkerUsage($accountTag: string, $datetime_geq: Time, $datetime_leq: Time) {
-            viewer {
-              accounts(filter: { accountTag: $accountTag }) {
-                workersInvocationsAdaptive(limit: 1000, filter: { datetime_geq: $datetime_geq, datetime_leq: $datetime_leq }) {
-                  sum { requests errors cpuTime }
-                }
+  const end = new Date();
+  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+  let snapshot: WorkerUsageSnapshot;
+  try {
+    const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${apiToken}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        query: `query WorkerUsage($accountTag: string, $datetime_geq: Time, $datetime_leq: Time) {
+          viewer {
+            accounts(filter: { accountTag: $accountTag }) {
+              workersInvocationsAdaptive(limit: 1000, filter: { datetime_geq: $datetime_geq, datetime_leq: $datetime_leq }) {
+                sum { requests errors cpuTime }
               }
             }
-          }`,
-          variables: {
-            accountTag: accountId,
-            datetime_geq: start.toISOString(),
-            datetime_leq: end.toISOString()
           }
-        })
-      });
-      const data = await res.json<any>();
-      if (!res.ok || data?.errors?.length) throw new Error(data?.errors?.[0]?.message || `HTTP ${res.status}`);
-      const rows = data?.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive || [];
-      snapshot = rows.reduce((acc: typeof snapshot, row: any) => ({
-        requests: acc.requests + Number(row.sum?.requests || 0),
-        errors: acc.errors + Number(row.sum?.errors || 0),
-        cpu_time_ms: acc.cpu_time_ms + Number(row.sum?.cpuTime || 0),
-        period_start: start.toISOString(),
-        period_end: end.toISOString()
-      }), { requests: 0, errors: 0, cpu_time_ms: 0, period_start: start.toISOString(), period_end: end.toISOString() });
-    } catch {
-      snapshot = { requests: 0, errors: 0, cpu_time_ms: 0, period_start: '', period_end: '' };
+        }`,
+        variables: {
+          accountTag: accountId,
+          datetime_geq: start.toISOString(),
+          datetime_leq: end.toISOString()
+        }
+      })
+    });
+    const data = await res.json<any>();
+    if (!res.ok || data?.errors?.length) throw new Error(data?.errors?.[0]?.message || `HTTP ${res.status}`);
+    const account = data?.data?.viewer?.accounts?.[0];
+    if (!account) {
+      throw new Error('未找到账户数据，请确认填写的是 Cloudflare Account ID 而不是 Zone ID，并检查 Token 的 Account Analytics Read 权限');
     }
+    const rows = account.workersInvocationsAdaptive || [];
+    snapshot = rows.reduce((acc: WorkerUsageSnapshot, row: any) => ({
+      requests: acc.requests + Number(row.sum?.requests || 0),
+      errors: acc.errors + Number(row.sum?.errors || 0),
+      cpu_time_ms: acc.cpu_time_ms + Number(row.sum?.cpuTime || 0),
+      period_start: start.toISOString(),
+      period_end: end.toISOString()
+    }), { requests: 0, errors: 0, cpu_time_ms: 0, period_start: start.toISOString(), period_end: end.toISOString() });
+  } catch (error) {
+    const detail = getErrorMessage(error);
+    await saveSettings(env, { lastWorkerUsageError: detail });
+    throw new HttpError(`Cloudflare Workers 用量查询失败：${detail}`, 502);
   }
 
   await env.DB.prepare(
     'INSERT INTO worker_usage_snapshots (id, requests, errors, cpu_time_ms, period_start, period_end) VALUES (?, ?, ?, ?, ?, ?)'
   ).bind(id('wus'), snapshot.requests, snapshot.errors, snapshot.cpu_time_ms, snapshot.period_start, snapshot.period_end).run();
-  await saveSettings(env, { lastWorkerUsageCheckAt: new Date().toISOString() });
+  await saveSettings(env, {
+    lastWorkerUsageCheckAt: new Date().toISOString(),
+    lastWorkerUsageError: ''
+  });
 
   const settings = await getSettings(env);
   const view = toWorkerUsageView(snapshot, quotaLimit);
@@ -1122,7 +1133,21 @@ async function captureWorkerUsage(env: Env, options: { forceNotify?: boolean } =
 }
 
 function hasWorkerUsageConfig(env: Env): boolean {
-  return Boolean(getCloudflareAccountId(env) && getCloudflareApiToken(env));
+  return getWorkerUsageConfigState(env).configured;
+}
+
+function getWorkerUsageConfigState(env: Env): {
+  configured: boolean;
+  accountIdConfigured: boolean;
+  apiTokenConfigured: boolean;
+} {
+  const accountIdConfigured = Boolean(getCloudflareAccountId(env));
+  const apiTokenConfigured = Boolean(getCloudflareApiToken(env));
+  return {
+    configured: accountIdConfigured && apiTokenConfigured,
+    accountIdConfigured,
+    apiTokenConfigured
+  };
 }
 
 function getCloudflareAccountId(env: Env): string {
@@ -1131,8 +1156,6 @@ function getCloudflareAccountId(env: Env): string {
     env.CLOUDFLARE_ACCOUNT_ID ||
     env.CF_ACCOUNT_TAG ||
     env.CLOUDFLARE_ACCOUNT_TAG ||
-    env.CF_ZONE_ID ||
-    env.CLOUDFLARE_ZONE_ID ||
     ''
   ).trim();
 }
@@ -1172,11 +1195,15 @@ function formatWorkerUsageNotification(snapshot: WorkerUsageView): string {
   const period = snapshot.period_start && snapshot.period_end
     ? `\n统计窗口：${snapshot.period_start} - ${snapshot.period_end}`
     : '';
-  return `Workers 用量：已用 ${snapshot.used_percent}，剩余 ${snapshot.remaining_percent}${period}`;
+  return `Workers 用量：过去 24 小时请求 ${snapshot.requests.toLocaleString()} / ${snapshot.quota_limit.toLocaleString()}，已用 ${snapshot.used_percent}，剩余 ${snapshot.remaining_percent}${period}`;
 }
 
-function workerUsageConfigMessage(): string {
-  return '请配置 Cloudflare 账号 ID 和 API Token 变量。账号 ID 可用 CF_ACCOUNT_ID / CLOUDFLARE_ACCOUNT_ID / CF_ACCOUNT_TAG / CLOUDFLARE_ACCOUNT_TAG，Token 可用 CF_API_TOKEN / CLOUDFLARE_API_TOKEN。';
+function workerUsageConfigMessage(env: Env): string {
+  const config = getWorkerUsageConfigState(env);
+  const missing: string[] = [];
+  if (!config.accountIdConfigured) missing.push('CF_ACCOUNT_ID（Cloudflare Account ID，不能填写 Zone ID）');
+  if (!config.apiTokenConfigured) missing.push('CF_API_TOKEN（需要 Account Analytics Read 权限）');
+  return `Workers 用量尚未配置完整，缺少：${missing.join('、')}。`;
 }
 
 async function sendUsageNotifications(env: Env, message: string): Promise<void> {
@@ -1444,6 +1471,12 @@ async function getSettings(env: Env): Promise<Record<string, any>> {
       settings[row.key] = row.value;
     }
   }
+  if (Number(settings.healthCheckIntervalVersion || 0) < 3) {
+    const updates: Record<string, unknown> = { healthCheckIntervalVersion: 3 };
+    if (Number(settings.healthCheckIntervalMinutes ?? 1) === 1) updates.healthCheckIntervalMinutes = 60;
+    await saveSettings(env, updates);
+    Object.assign(settings, updates);
+  }
   const merged = { ...defaultPublicSettings, ...settings };
   if (!Object.prototype.hasOwnProperty.call(settings, 'emailVerificationEnabled')) {
     merged.emailVerificationEnabled = false;
@@ -1550,7 +1583,7 @@ async function testChannelCompletionUrl(channel: any): Promise<{ ok: boolean; ur
           max_tokens: 1,
           stream: false
         }),
-        signal: AbortSignal.timeout(12000)
+        signal: AbortSignal.timeout(60000)
       });
       const text = await res.clone().text().catch(() => '');
       const latencyMs = Date.now() - started;

@@ -9,7 +9,7 @@ Only API 是一个可部署到 Cloudflare Workers + Pages 的 OpenAI 兼容 API 
 
 你也许可以使用 Cloudflare 域名优选服务来提升速度，前端并不进行调用所以可以不进行优选。优选的链接你可以通过进行网络查找。
 
-本仓库适合 GitHub 托管和 Cloudflare 控制台部署，不需要使用 `wrangler.toml`。
+本仓库适合 GitHub 托管和 Cloudflare 控制台部署。项目已包含 `wrangler.toml`，用于固定 Worker 入口、名称、普通变量和 Cron Trigger；D1 采用手动绑定。
 
 ## 语言
 
@@ -26,6 +26,7 @@ Only API 是一个可部署到 Cloudflare Workers + Pages 的 OpenAI 兼容 API 
 | --- | --- |
 | Pages 前端 | `apps/web` |
 | Worker 后端 | `apps/api/src/index.ts` |
+| Worker 部署配置 | `wrangler.toml` |
 | D1 建表 SQL | `apps/api/migrations/0001_initial.sql` |
 | 依赖文件 | `package.json` |
 
@@ -58,13 +59,15 @@ Worker 构建设置：
 | --- | --- |
 | 根目录 | 留空或 `/` |
 | 构建命令 | `npm ci` |
-| 部署命令 | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
+| 部署命令 | `npx wrangler deploy` |
 
-`--keep-vars` 只用于保留控制台中的普通环境变量；密钥由 Cloudflare 单独保留，但该参数不会声明或保证 D1 绑定。本仓库按要求不使用 Wrangler 配置文件，因此必须始终部署到同名 Worker，并在每次更新 Worker 后检查 `DB` 绑定。若绑定丢失，请重新绑定原来的 D1 数据库，不要新建数据库。
+Wrangler 是 Cloudflare 官方部署工具，在本项目中由 Cloudflare 的 Git 构建自动运行并读取 `wrangler.toml`。它负责部署代码、通过 `keep_vars = true` 保留控制台普通变量，并安装每小时 Cron Trigger。配置文件不再声明 D1；每次 Worker 更新后，如果 Cloudflare 清除了绑定，请手动把原来的 D1 重新绑定为 `DB`。
 
-## 部署 2：创建 D1 数据库
+配置中的 `keep_vars = true` 会保留控制台变量。所有密钥继续放在 Cloudflare 控制台中，不要写入 `wrangler.toml`。
 
-在 Cloudflare 控制台创建 D1 数据库。
+## 部署 2：创建或继续使用 D1 数据库
+
+第一次部署时创建 D1；后续更新继续使用原来的数据库，不要重新建库。
 
 推荐数据库名称：
 
@@ -100,11 +103,11 @@ SQL 会创建这些表：
 
 ## 部署 3：绑定 Worker 资源和变量
 
-在 Worker 设置中绑定 D1：
+每次部署 Worker 后检查绑定页面，必要时手动重新绑定 D1：
 
 | 类型 | 名称 | 值 |
 | --- | --- | --- |
-| D1 数据库 | `DB` | 你的 D1 数据库 |
+| D1 数据库 | `DB` | 原来的 `only_api` 数据库 |
 
 首次初始化必要的 Worker 变量：
 
@@ -119,7 +122,7 @@ SQL 会创建这些表：
 | 名称 | 类型 | 用途 |
 | --- | --- | --- |
 | `APP_ORIGIN` | 变量 | Pages 前端地址，用于限制 CORS；不填时会退回 `*` |
-| `API_PUBLIC_BASE_URL` | 变量 | 前端显示的 Worker 公共地址 |
+| `API_PUBLIC_BASE_URL` | 变量 | API Key 页面显示的 Worker 后端公网根地址，例如 `https://你的-worker.workers.dev`；不要追加 `/v1` |
 
 可选邮箱变量：
 
@@ -146,7 +149,7 @@ SQL 会创建这些表：
 | `CF_API_TOKEN` | 密钥 | 可读取 Workers 用量的 API Token |
 | `WORKERS_DAILY_REQUEST_LIMIT` | 变量 | 计算百分比用的每日请求额度，默认 `100000` |
 
-也支持这些别名：`CLOUDFLARE_ACCOUNT_ID`、`CF_ACCOUNT_TAG`、`CLOUDFLARE_ACCOUNT_TAG`、`CF_ZONE_ID`、`CLOUDFLARE_ZONE_ID`、`CLOUDFLARE_API_TOKEN`、`CF_TOKEN`、`CLOUDFLARE_TOKEN`。
+也支持这些别名：`CLOUDFLARE_ACCOUNT_ID`、`CF_ACCOUNT_TAG`、`CLOUDFLARE_ACCOUNT_TAG`、`CLOUDFLARE_API_TOKEN`、`CF_TOKEN`、`CLOUDFLARE_TOKEN`。该 GraphQL 查询必须使用 Account ID，Zone ID 不能替代。
 
 可选后端 Umami 变量：
 
@@ -174,9 +177,18 @@ WxPusher 推送变量：
 | `WXPUSHER_UIDS` | 变量 | 用英文逗号分隔的 UID，未使用 Topic 时必填 |
 | `WXPUSHER_TOPIC_IDS` | 变量 | 用英文逗号分隔的 Topic ID，未使用 UID 时必填 |
 
+可选功能变量的必填规则：
+
+- 邮箱验证：`RESEND_API_KEY` 和 `RESEND_FROM` 两项都必填。
+- Turnstile：Worker 的 `TURNSTILE_SECRET_KEY` 与 Pages 的 `VITE_TURNSTILE_SITE_KEY` 两项都必填。
+- Workers 用量：`CF_ACCOUNT_ID` 和 `CF_API_TOKEN` 两项必填；`WORKERS_DAILY_REQUEST_LIMIT` 可选，默认 `100000`。
+- 后端 Umami：启用时 Website ID 必填，Host URL 和 Hostname 可选；环境变量本身是系统设置的可选覆盖项。
+- Telegram：Bot Token 和 Chat ID 两项必填，其余 Telegram 变量可选。
+- WxPusher：AppToken 必填，并且 UID 或 Topic ID 至少填写一种，其余变量可选。
+
 自动检测和自动推送所需的定时触发器：
 
-需要自动检测渠道、自动采集 Workers 用量或自动推送时，必须在 Cloudflare 控制台为 Worker 添加 Cron Trigger。推荐表达式为 `0 * * * *`（每小时触发一次）。每次触发只负责唤醒 Worker，代码会自行判断设置的间隔是否已经到达：渠道检测默认 60 分钟，Workers 用量采集默认 360 分钟。自动推送还需要在系统设置中开启“推送 Workers 用量”，并配置 Telegram 或 WxPusher 变量。
+`wrangler.toml` 已配置 `0 * * * *`，每小时唤醒一次 Worker。渠道自动检测默认每 60 分钟执行；每个候选补全 URL 最多等待 60 秒，无响应后切换下一个。Workers 用量每 360 分钟（6 小时）采集一次，开启推送并配置 Telegram 或 WxPusher 后也每 6 小时推送一次。
 
 ## 部署 4：部署 Pages 前端
 
@@ -191,23 +203,28 @@ Pages 构建设置：
 | 构建命令 | `npm ci && npm run build:web` |
 | 构建输出目录 | `apps/web/dist` |
 
-如果 Cloudflare 要求指定 Node.js 构建版本，请添加 Pages 构建变量 `NODE_VERSION=20`。
-
 Pages 必要变量：
 
-```txt
-VITE_API_BASE_URL=https://你的-worker域名.workers.dev
-```
+| 名称 | 类型 | 用途 |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | 变量 | 前端实际请求的 Worker 后端根地址，例如 `https://你的-worker.workers.dev`；不要追加 `/v1` |
 
 Pages 可选变量：
 
-```txt
-VITE_TURNSTILE_SITE_KEY=你的-turnstile-site-key
-VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
-VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
-VITE_UMAMI_WEBSITE_ID=你的前端-umami-website-id
-VITE_UMAMI_HOST_URL=https://cloud.umami.is
-```
+| 名称 | 类型 | 用途 |
+| --- | --- | --- |
+| `NODE_VERSION` | 构建变量 | Cloudflare 要求指定 Node.js 构建版本时填 `20` |
+| `VITE_TURNSTILE_SITE_KEY` | 变量 | 公开的 Turnstile Site Key；开启人机验证时必填 |
+| `VITE_BACKGROUND_IMAGE_URL` | 变量 | 默认前端背景图片 URL |
+| `VITE_UMAMI_SCRIPT_URL` | 变量 | Umami 统计脚本地址，例如 `https://cloud.umami.is/script.js` |
+| `VITE_UMAMI_WEBSITE_ID` | 变量 | 前端 Umami Website ID；配置后也会启用备用统计 |
+| `VITE_UMAMI_HOST_URL` | 变量 | 可选 Umami 主机地址，主要用于自建 Umami |
+
+`NODE_VERSION` 和背景图片 URL 始终可选。只有开启 Turnstile 时 Site Key 才是条件必填。前端 Umami 若在系统设置中填写，则这三个 Pages 变量均可选；若只使用 Pages 变量，则 Website ID 与 Script URL 必填，Host URL 可选。
+
+所有以 `VITE_` 开头的变量都会编译进浏览器 JavaScript，任何访问者都能看到。不要把密钥、上游 API Key、Worker Token 或 Turnstile Secret Key 填进 `VITE_` 变量。
+
+`API_PUBLIC_BASE_URL` 和 `VITE_API_BASE_URL` 通常填写同一个 Worker 地址，但用途不同：前者是 Worker 的可选变量，只负责在 API Key 页面显示客户端调用地址；后者是 Pages 的必要构建变量，真正决定前端向哪个 Worker 发请求。
 
 Pages 部署完成后，把 Worker 变量 `APP_ORIGIN` 设置为 Pages 前端地址。
 
@@ -247,6 +264,8 @@ Pages 部署完成后，把 Worker 变量 `APP_ORIGIN` 设置为 Pages 前端地
 
 Workers 用量监测需要 Cloudflare 账号 ID 和 API Token 变量。缺少变量时，前端会显示配置提示。
 
+请填写 Cloudflare 账户总览中的 Account ID，不要填写域名的 Zone ID。API Token 需要 `Account > Account Analytics > Read` 权限。前端现在会明确显示缺少哪个变量以及最近一次 GraphQL 错误；查询失败不会再写入全零快照，也不会再推送误导性的零用量消息。
+
 页面会显示：
 
 - 当前已用百分比
@@ -270,15 +289,6 @@ https://你的-worker域名.workers.dev/v1
 
 ```http
 Authorization: Bearer oi-only-...
-```
-
-SillyTavern 推荐设置：
-
-```txt
-API 类型：OpenAI Compatible / Custom OpenAI-compatible
-API Base URL：https://你的-worker域名.workers.dev/v1
-API Key：完整的 oi-only-... 密钥
-模型：从模型广场复制模型名
 ```
 
 ## 渠道 Base URL
@@ -306,13 +316,6 @@ API Key：完整的 oi-only-... 密钥
 3. 修改 Pages 变量后重新部署 Pages。
 4. 检查 Worker 绑定 `DB`。
 5. 检查 Worker 的 `DB` 绑定和 `APP_ORIGIN`；首次初始化时还要检查 `ADMIN_SETUP_SECRET`。
-
-如果 SillyTavern 显示 Unauthorized：
-
-1. 使用完整密钥，不要只复制前缀。
-2. 使用 OpenAI Compatible 或 Custom OpenAI-compatible 模式。
-3. 确认密钥前后没有空格。
-4. 确认选择的模型名存在于模型广场。
 
 ## 专业可选变量
 

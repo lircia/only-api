@@ -8,7 +8,7 @@ Only API هو بوابة API متوافقة مع OpenAI ويمكن نشرها ع
 
 يمكنك استخدام خدمة تحسين نطاق Cloudflare أو preferred-IP لتحسين السرعة. الواجهة الأمامية لا تستدعي المزودين العلويين مباشرة، لذلك لا تحتاج عادة إلى تحسين نطاق الواجهة الأمامية. يمكنك العثور على روابط التحسين من خلال البحث على الويب.
 
-هذا المستودع مناسب للاستضافة على GitHub والنشر من لوحة Cloudflare. لا يستخدم المشروع `wrangler.toml`.
+هذا المستودع مناسب لـ GitHub ولوحة Cloudflare. يثبت `wrangler.toml` مدخل Worker واسمه والمتغيرات العادية وCron Trigger؛ ويربط D1 يدويا.
 
 ## اللغات
 
@@ -25,6 +25,7 @@ Only API هو بوابة API متوافقة مع OpenAI ويمكن نشرها ع
 | --- | --- |
 | واجهة Pages | `apps/web` |
 | خلفية Worker | `apps/api/src/index.ts` |
+| إعداد نشر Worker | `wrangler.toml` |
 | SQL الخاص بقاعدة D1 | `apps/api/migrations/0001_initial.sql` |
 | ملف الاعتماديات | `package.json` |
 
@@ -57,13 +58,13 @@ Only API هو بوابة API متوافقة مع OpenAI ويمكن نشرها ع
 | --- | --- |
 | Root directory | فارغ أو `/` |
 | Build command | `npm ci` |
-| Deploy command | `npx wrangler deploy apps/api/src/index.ts --name only-api-worker --compatibility-date 2024-12-01 --keep-vars` |
+| Deploy command | `npx wrangler deploy` |
 
-يحافظ `--keep-vars` على متغيرات البيئة العادية في اللوحة فقط. تحفظ Cloudflare الأسرار بشكل منفصل، لكنه لا يعلن ربط D1 ولا يضمن بقاءه. لأن المستودع لا يستخدم ملف إعداد Wrangler، انشر دائما إلى Worker بالاسم نفسه وافحص ربط `DB` بعد كل تحديث. إذا اختفى، فأعد ربط قاعدة D1 الحالية ولا تنشئ قاعدة جديدة.
+Wrangler أداة Cloudflare الرسمية. يقرأ بناء Git ملف `wrangler.toml`، وينشر الكود، ويحفظ المتغيرات العادية عبر `keep_vars = true`، ويضبط Cron Trigger كل ساعة. لا يعلن D1؛ فإذا اختفى الربط بعد التحديث فأعد ربط قاعدة D1 الحالية يدويا باسم `DB`.
 
-## النشر 2: إنشاء قاعدة D1
+## النشر 2: إنشاء D1 أو إعادة استخدامها
 
-أنشئ قاعدة D1 في لوحة Cloudflare.
+أنشئ D1 في أول مرة فقط، واستخدم القاعدة نفسها عند التحديثات.
 
 الاسم الموصى به للقاعدة:
 
@@ -99,11 +100,11 @@ apps/api/migrations/0001_initial.sql
 
 ## النشر 3: ربط موارد ومتغيرات Worker
 
-اربط D1 في إعدادات Worker:
+بعد كل نشر افحص الربط وأعد ربط D1 يدويا عند الحاجة:
 
 | النوع | الاسم | القيمة |
 | --- | --- | --- |
-| D1 database | `DB` | قاعدة D1 الخاصة بك |
+| D1 database | `DB` | قاعدة `only_api` الحالية |
 
 متغير Worker الضروري للإعداد الأول:
 
@@ -118,7 +119,7 @@ apps/api/migrations/0001_initial.sql
 | الاسم | النوع | الغرض |
 | --- | --- | --- |
 | `APP_ORIGIN` | متغير | رابط Pages لتقييد CORS؛ من دونه تستخدم القيمة `*` |
-| `API_PUBLIC_BASE_URL` | متغير | رابط Worker العام الذي يظهر في الواجهة |
+| `API_PUBLIC_BASE_URL` | متغير | رابط Worker الجذري العام الظاهر في صفحة API Key، مثل `https://your-worker.workers.dev`، من دون `/v1` |
 
 متغيرات البريد الاختيارية:
 
@@ -145,7 +146,7 @@ apps/api/migrations/0001_initial.sql
 | `CF_API_TOKEN` | سر | رمز API يستطيع قراءة استخدام Workers |
 | `WORKERS_DAILY_REQUEST_LIMIT` | متغير | حد الطلبات اليومي لحساب النسبة، الافتراضي `100000` |
 
-الأسماء البديلة المقبولة هي `CLOUDFLARE_ACCOUNT_ID` و`CF_ACCOUNT_TAG` و`CLOUDFLARE_ACCOUNT_TAG` و`CF_ZONE_ID` و`CLOUDFLARE_ZONE_ID` و`CLOUDFLARE_API_TOKEN` و`CF_TOKEN` و`CLOUDFLARE_TOKEN`.
+الأسماء البديلة المقبولة هي `CLOUDFLARE_ACCOUNT_ID` و`CF_ACCOUNT_TAG` و`CLOUDFLARE_ACCOUNT_TAG` و`CLOUDFLARE_API_TOKEN` و`CF_TOKEN` و`CLOUDFLARE_TOKEN`. يتطلب GraphQL معرف الحساب، ولا يصلح معرف المنطقة بدلا منه.
 
 متغيرات Umami الخلفية الاختيارية:
 
@@ -173,9 +174,11 @@ apps/api/migrations/0001_initial.sql
 | `WXPUSHER_UIDS` | متغير | قائمة UID مفصولة بفواصل، مطلوبة إذا لم تستخدم معرفات الموضوع |
 | `WXPUSHER_TOPIC_IDS` | متغير | قائمة معرفات الموضوع مفصولة بفواصل، مطلوبة إذا لم تستخدم UID |
 
+قواعد الإلزام: يحتاج البريد إلى متغيري Resend؛ ويحتاج Turnstile إلى Secret Key في Worker وSite Key في Pages؛ ويحتاج استخدام Workers إلى `CF_ACCOUNT_ID` و`CF_API_TOKEN`، بينما الحد اليومي اختياري وافتراضيه `100000`. يحتاج Umami الخلفي إلى Website ID عند التفعيل. يحتاج Telegram إلى Bot Token وChat ID. يحتاج WxPusher إلى AppToken وUID أو Topic ID، والباقي اختياري.
+
 المشغل المجدول المطلوب للفحص والتنبيه التلقائي:
 
-يلزم إضافة Worker Cron Trigger للفحص التلقائي للقنوات أو جمع استخدام Workers أو إرسال التنبيهات تلقائيا. التعبير الموصى به هو `0 * * * *`، أي مرة كل ساعة. فحص القنوات افتراضيا كل 60 دقيقة وجمع الاستخدام كل 360 دقيقة. ويتطلب التنبيه التلقائي أيضا تفعيل مفتاح التنبيه وضبط Telegram أو WxPusher.
+يشغل `wrangler.toml` العامل كل ساعة بالتعبير `0 * * * *`. يفحص القنوات كل 60 دقيقة، وينتظر كل رابط مرشح حتى 60 ثانية. يجمع الاستخدام كل 360 دقيقة (6 ساعات)، ويرسله بالفاصل نفسه عند تفعيل التنبيهات.
 
 ## النشر 4: نشر واجهة Pages
 
@@ -190,23 +193,26 @@ apps/api/migrations/0001_initial.sql
 | Build command | `npm ci && npm run build:web` |
 | Build output directory | `apps/web/dist` |
 
-إذا طلبت Cloudflare إصدار Node.js للبناء، فأضف متغير بناء Pages التالي: `NODE_VERSION=20`.
-
 متغير Pages الضروري:
 
-```txt
-VITE_API_BASE_URL=https://your-worker-domain.workers.dev
-```
+| الاسم | النوع | الغرض |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | متغير | رابط Worker الجذري الذي تستدعيه الواجهة فعليا، مثل `https://your-worker.workers.dev`، من دون `/v1` |
 
 متغيرات Pages الاختيارية:
 
-```txt
-VITE_TURNSTILE_SITE_KEY=your-turnstile-site-key
-VITE_BACKGROUND_IMAGE_URL=https://example.com/background.jpg
-VITE_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
-VITE_UMAMI_WEBSITE_ID=your-frontend-umami-website-id
-VITE_UMAMI_HOST_URL=https://cloud.umami.is
-```
+| الاسم | النوع | الغرض |
+| --- | --- | --- |
+| `NODE_VERSION` | متغير بناء | اضبطه على `20` عند طلب إصدار Node.js |
+| `VITE_TURNSTILE_SITE_KEY` | متغير | مفتاح Turnstile Site Key علني؛ مطلوب عند تفعيل Turnstile |
+| `VITE_BACKGROUND_IMAGE_URL` | متغير | رابط صورة الخلفية الافتراضية |
+| `VITE_UMAMI_SCRIPT_URL` | متغير | رابط سكربت Umami، مثل `https://cloud.umami.is/script.js` |
+| `VITE_UMAMI_WEBSITE_ID` | متغير | معرف موقع Umami للواجهة؛ يفعّل أيضا الإحصاء الاحتياطي |
+| `VITE_UMAMI_HOST_URL` | متغير | رابط مضيف Umami اختياري، خصوصا للاستضافة الذاتية |
+
+تدمج كل المتغيرات التي تبدأ بـ `VITE_` داخل JavaScript في المتصفح وتصبح علنية. لا تضع فيها أسرارا أو مفاتيح upstream API أو رموز Worker أو Turnstile Secret Key.
+
+يحتوي `API_PUBLIC_BASE_URL` و`VITE_API_BASE_URL` عادة على رابط Worker نفسه. الأول متغير Worker اختياري للعرض فقط، والثاني متغير بناء Pages ضروري يحدد الطلبات الفعلية للواجهة.
 
 بعد نشر Pages، اضبط متغير Worker `APP_ORIGIN` على رابط Pages.
 
@@ -246,6 +252,8 @@ Umami للواجهة الأمامية يسجل زيارات لوحة Pages. يم
 
 مراقبة استخدام Workers تحتاج إلى متغير Cloudflare Account ID ومتغير API Token. إذا كانت ناقصة، تعرض الواجهة رسالة إعداد.
 
+استخدم Account ID من نظرة الحساب، وليس Zone ID. يحتاج الرمز إلى صلاحية `Account > Account Analytics > Read`. تعرض الواجهة المتغير الناقص وآخر خطأ GraphQL، ولا تحفظ الاستعلامات الفاشلة كاستخدام صفري ولا ترسلها.
+
 تعرض الصفحة:
 
 - نسبة الاستخدام الحالية
@@ -269,15 +277,6 @@ Header:
 
 ```http
 Authorization: Bearer oi-only-...
-```
-
-إعدادات SillyTavern الموصى بها:
-
-```txt
-API type: OpenAI Compatible / Custom OpenAI-compatible
-API Base URL: https://your-worker-domain.workers.dev/v1
-API Key: المفتاح الكامل oi-only-...
-Model: اسم نموذج منسوخ من ساحة النماذج
 ```
 
 ## رابط القناة الأساسي
@@ -305,13 +304,6 @@ Model: اسم نموذج منسوخ من ساحة النماذج
 3. أعد نشر Pages بعد تغيير متغيرات Pages.
 4. افحص ربط Worker باسم `DB`.
 5. افحص ربط `DB` في Worker و`APP_ORIGIN`، وافحص `ADMIN_SETUP_SECRET` عند الإعداد الأول.
-
-إذا أظهر SillyTavern رسالة Unauthorized:
-
-1. استخدم المفتاح الكامل، وليس البادئة الظاهرة فقط.
-2. استخدم وضع OpenAI Compatible أو Custom OpenAI-compatible.
-3. تأكد من عدم وجود مسافات قبل المفتاح أو بعده.
-4. تأكد أن اسم النموذج المختار موجود في ساحة النماذج.
 
 ## متغيرات اختيارية متقدمة
 

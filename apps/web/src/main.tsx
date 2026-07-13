@@ -961,12 +961,14 @@ function WorkerUsage({ api }: { api: ApiClient }) {
   const [rows, setRows] = useState<any[]>([]);
   const [configured, setConfigured] = useState(true);
   const [message, setMessage] = useState('');
+  const [lastError, setLastError] = useState('');
   const [quotaLimit, setQuotaLimit] = useState(100000);
   const [busy, setBusy] = useState(false);
   async function load() {
     const data = await api.get('/api/admin/worker-usage');
     setConfigured(data.configured !== false);
     setMessage(data.message || '');
+    setLastError(data.lastError || '');
     setQuotaLimit(Number(data.quotaLimit || 100000));
     setRows(data.snapshots || []);
   }
@@ -975,9 +977,12 @@ function WorkerUsage({ api }: { api: ApiClient }) {
     setBusy(true);
     try {
       await api.post('/api/admin/worker-usage-check', {});
-      await load();
     } finally {
-      setBusy(false);
+      try {
+        await load();
+      } finally {
+        setBusy(false);
+      }
     }
   }
   const latest = rows[0];
@@ -985,6 +990,8 @@ function WorkerUsage({ api }: { api: ApiClient }) {
     <section className="content">
       <div className="toolbar"><h2>Workers 用量监测</h2><button className="primaryBtn" onClick={capture} disabled={busy || !configured}><RefreshCw className={busy ? 'spin' : ''} />{busy ? '检测中' : '立即采集'}</button></div>
       {!configured && <div className="panel"><div className="errorText">{message || '请配置 Cloudflare 账号 ID 和 API Token 变量后再检测 Workers 用量。'}</div></div>}
+      {configured && lastError && <div className="panel"><div className="errorText">上次查询失败：{lastError}</div></div>}
+      {configured && !lastError && !latest && <div className="panel"><div className="empty">变量已识别，点击“立即采集”检查 Cloudflare 用量接口。</div></div>}
       {latest && (
         <div className="metricGrid workerMetrics">
           <Metric label="当前已用" value={latest.used_percent || '0%'} />

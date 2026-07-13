@@ -124,6 +124,7 @@ INSERT OR IGNORE INTO system_settings (key, value) VALUES
   ('emailDomainValidationEnabled', 'false'),
   ('qqEmailNumericPrefixRequired', 'false'),
   ('healthCheckIntervalMinutes', '60'),
+  ('healthCheckIntervalVersion', '3'),
   ('workerUsageIntervalMinutes', '360'),
   ('lastHealthCheckAt', '""'),
   ('lastWorkerUsageCheckAt', '""'),

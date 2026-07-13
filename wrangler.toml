@@ -1,0 +1,14 @@
+name = "only-api-worker"
+main = "apps/api/src/index.ts"
+compatibility_date = "2024-12-01"
+workers_dev = true
+keep_vars = true
+
+[vars]
+WORKERS_DAILY_REQUEST_LIMIT = "100000"
+
+[triggers]
+crons = ["0 * * * *"]
+
+[observability]
+enabled = true
