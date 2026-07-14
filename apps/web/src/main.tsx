@@ -293,19 +293,22 @@ function App() {
 
 function SuccessDialog({ message, onClose }: { message: string; onClose: () => void }) {
   useEffect(() => {
+    const timer = window.setTimeout(onClose, 3000);
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
   }, [onClose]);
   return (
-    <div className="dialogBackdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="successDialog" role="dialog" aria-modal="true" aria-labelledby="success-dialog-title">
-        <CheckCircle2 />
-        <h2 id="success-dialog-title">操作成功</h2>
-        <p>{message}</p>
-        <button className="primaryBtn" onClick={onClose} autoFocus>确定</button>
+    <div className="successPopup" role="status" aria-live="polite">
+      <CheckCircle2 />
+      <div>
+        <strong>操作成功</strong>
+        <span>{message}</span>
       </div>
     </div>
   );
