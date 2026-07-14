@@ -95,6 +95,7 @@ const defaultPublicSettings = {
   qqEmailNumericPrefixRequired: false,
   healthCheckIntervalMinutes: 60,
   workerUsageIntervalMinutes: 360,
+  defaultChannelStrategy: 'priority',
   notifyWorkerUsage: false,
   frontendUmamiEnabled: false,
   frontendUmamiScriptUrl: '',
@@ -226,6 +227,10 @@ async function getBootstrap(env: Env): Promise<Response> {
       backgroundImageUrl: settings.backgroundImageUrl ?? '',
       emailDomainValidationEnabled: settings.emailDomainValidationEnabled ?? false,
       qqEmailNumericPrefixRequired: settings.qqEmailNumericPrefixRequired ?? false,
+      healthCheckIntervalMinutes: Number(settings.healthCheckIntervalMinutes ?? defaultPublicSettings.healthCheckIntervalMinutes),
+      workerUsageIntervalMinutes: Number(settings.workerUsageIntervalMinutes ?? defaultPublicSettings.workerUsageIntervalMinutes),
+      defaultChannelStrategy: settings.defaultChannelStrategy ?? defaultPublicSettings.defaultChannelStrategy,
+      notifyWorkerUsage: settings.notifyWorkerUsage === true,
       frontendUmamiEnabled: settings.frontendUmamiEnabled ?? false,
       frontendUmamiScriptUrl: settings.frontendUmamiScriptUrl ?? '',
       frontendUmamiWebsiteId: settings.frontendUmamiWebsiteId ?? '',
@@ -715,7 +720,7 @@ async function updateAdminSettings(request: Request, env: Env): Promise<Response
   if ('themeName' in body) updates.themeDefaultPinned = true;
   await saveSettings(env, updates);
   if (Object.keys(updates).some((key) => key.startsWith('backendUmami'))) backendUmamiCache = null;
-  return json({ settings: await getSettings(env) });
+  return json({ ok: true, message: '保存成功', settings: await getSettings(env) });
 }
 
 async function listUsers(env: Env): Promise<Response> {

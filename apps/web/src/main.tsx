@@ -119,9 +119,10 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [bootError, setBootError] = useState('');
   const [notice, setNotice] = useState('');
+  const [successDialog, setSuccessDialog] = useState('');
   const [umamiReady, setUmamiReady] = useState(false);
 
-  const api = useMemo(() => makeApi(token, setNotice), [token]);
+  const api = useMemo(() => makeApi(token, setNotice, setSuccessDialog), [token]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.themeName || 'black-white';
@@ -285,6 +286,27 @@ function App() {
         {active === 'channels' && admin && <Channels api={api} />}
         {active === 'workerUsage' && admin && <WorkerUsage api={api} />}
       </main>
+      {successDialog && <SuccessDialog message={successDialog} onClose={() => setSuccessDialog('')} />}
+    </div>
+  );
+}
+
+function SuccessDialog({ message, onClose }: { message: string; onClose: () => void }) {
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [onClose]);
+  return (
+    <div className="dialogBackdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div className="successDialog" role="dialog" aria-modal="true" aria-labelledby="success-dialog-title">
+        <CheckCircle2 />
+        <h2 id="success-dialog-title">操作成功</h2>
+        <p>{message}</p>
+        <button className="primaryBtn" onClick={onClose} autoFocus>确定</button>
+      </div>
     </div>
   );
 }
@@ -672,7 +694,7 @@ function Models({ api, admin }: { api: ApiClient; admin: boolean }) {
   async function saveModel(model: any) {
     const displayName = (drafts[model.id] || '').trim();
     if (!displayName) return;
-    await api.patch(`/api/admin/models/${model.id}`, { display_name: displayName, status: 'enabled' });
+    await api.patch(`/api/admin/models/${model.id}`, { display_name: displayName, status: 'enabled' }, 'dialog');
     await load();
   }
   async function removeModel(model: any) {
@@ -790,7 +812,7 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
   const [testingNotify, setTestingNotify] = useState('');
   const [testingUmami, setTestingUmami] = useState(false);
   async function save() {
-    const data = await api.put('/api/admin/settings', form);
+    const data = await api.put('/api/admin/settings', form, 'dialog');
     onSaved(data.settings);
   }
   async function testNotify(type: 'telegram' | 'wxpusher') {
@@ -804,9 +826,9 @@ function AdminSettings({ api, settings, onSaved }: { api: ApiClient; settings: S
   async function testUmami() {
     setTestingUmami(true);
     try {
-      const data = await api.put('/api/admin/settings', form);
+      const data = await api.put('/api/admin/settings', form, 'none');
       onSaved(data.settings);
-      await api.post('/api/admin/umami-test', {});
+      await api.post('/api/admin/umami-test', {}, true, 'dialog');
     } finally {
       setTestingUmami(false);
     }
@@ -890,7 +912,7 @@ function UsersPage({ api }: { api: ApiClient }) {
   }
   useLoad(load, []);
   async function update(row: any, patch: any) {
-    await api.patch(`/api/admin/users/${row.id}`, { ...row, ...patch });
+    await api.patch(`/api/admin/users/${row.id}`, { ...row, ...patch }, 'dialog');
     await load();
   }
   async function remove(row: any) {
@@ -925,7 +947,7 @@ function Channels({ api }: { api: ApiClient }) {
   useLoad(load, []);
   async function save(event: React.FormEvent) {
     event.preventDefault();
-    await api.post('/api/admin/channels', form);
+    await api.post('/api/admin/channels', form, true, 'dialog');
     setForm({ ...form, name: '', api_key: '', is_full_url: false });
     await load();
   }
@@ -1090,11 +1112,14 @@ function useTurnstile(siteKey: string) {
 
 type ApiClient = ReturnType<typeof makeApi>;
 
-function makeApi(token: string, setNotice: (message: string) => void) {
-  async function request(path: string, method: string, body?: unknown, auth = true): Promise<any> {
+type SuccessMode = 'notice' | 'dialog' | 'none';
+
+function makeApi(token: string, setNotice: (message: string) => void, setSuccessDialog: (message: string) => void) {
+  async function request(path: string, method: string, body?: unknown, auth = true, successMode: SuccessMode = 'notice'): Promise<any> {
     setNotice('');
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 15000);
+    const timeoutMs = path === '/api/admin/health-check' ? 300000 : path.endsWith('/test') ? 75000 : 15000;
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
     let response: Response;
     try {
       response = await fetch(`${apiBaseUrl}${path}`, {
@@ -1125,14 +1150,18 @@ function makeApi(token: string, setNotice: (message: string) => void) {
       setNotice(message);
       throw new Error(message);
     }
-    if (method !== 'GET') setNotice(data.message || '成功');
+    if (method !== 'GET') {
+      const message = data.message || '保存成功';
+      if (successMode === 'dialog') setSuccessDialog(message);
+      else if (successMode === 'notice') setNotice(message);
+    }
     return data;
   }
   return {
     get: (path: string, auth = true) => request(path, 'GET', undefined, auth),
-    post: (path: string, body: unknown, auth = true) => request(path, 'POST', body, auth),
-    put: (path: string, body: unknown) => request(path, 'PUT', body),
-    patch: (path: string, body: unknown) => request(path, 'PATCH', body),
+    post: (path: string, body: unknown, auth = true, successMode: SuccessMode = 'notice') => request(path, 'POST', body, auth, successMode),
+    put: (path: string, body: unknown, successMode: SuccessMode = 'notice') => request(path, 'PUT', body, true, successMode),
+    patch: (path: string, body: unknown, successMode: SuccessMode = 'notice') => request(path, 'PATCH', body, true, successMode),
     delete: (path: string) => request(path, 'DELETE')
   };
 }
